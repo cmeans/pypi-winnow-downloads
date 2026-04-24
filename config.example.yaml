@@ -1,0 +1,24 @@
+# Example configuration for pypi-winnow-downloads.
+# Copy to /etc/pypi-winnow-downloads/config.yaml (or the path your systemd
+# unit passes via --config) and edit to suit.
+
+service:
+  # Where shields.io-endpoint JSON files are written.
+  # Served read-only by the static HTTP server (Caddy/nginx).
+  output_dir: /var/lib/pypi-winnow-downloads/output
+
+  # Google Cloud service account JSON with BigQuery Job User +
+  # BigQuery Data Viewer roles. File must be readable by the service user.
+  credential_file: /etc/pypi-winnow-downloads/gcp.json
+
+  # Warn (in the log) if the last successful collector run is older than this
+  # many days. v1 is log-only — badge JSON on disk is not mutated by staleness.
+  stale_threshold_days: 3
+
+packages:
+  - name: mcp-clipboard
+    window_days: 30
+  - name: mcp-synology
+    window_days: 30
+  - name: yt-dont-recommend
+    window_days: 30

@@ -14,3 +14,4 @@ build/
 *.tar.gz
 .mypy_cache/
 .DS_Store
+coverage.xml
