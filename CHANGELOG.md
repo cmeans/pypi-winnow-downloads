@@ -30,5 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stub `pypi_winnow_downloads.__main__` so the `winnow-collect` console
   script installs and exits cleanly instead of raising `ModuleNotFoundError`
   before the real CLI lands.
+- CI workflow (ruff, mypy, pytest × Python 3.11/3.12/3.13, codecov upload).
+- PR-label automation workflows (pr-labels, pr-labels-ci, qa-gate) ported
+  from mcp-clipboard; QA-state-machine labels installed on the repo.
+- Publish workflows for PyPI (on `v*` tag) and TestPyPI (on `test-v*` tag)
+  using OIDC trusted publishing.
+- `mypy` + `types-PyYAML` in the `dev` optional dependencies so CI's
+  typecheck job resolves.
+- README badge row including a self-hosted "non-CI downloads" badge
+  (dogfood — goes live once M3 deploys the service).
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD
