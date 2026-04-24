@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pypi-winnow-downloads"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Self-hosted PyPI download badge service that winnows CI traffic out of download counts."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,6 +45,9 @@ winnow-collect = "pypi_winnow_downloads.__main__:main"
 Homepage = "https://github.com/cmeans/pypi-winnow-downloads"
 Repository = "https://github.com/cmeans/pypi-winnow-downloads"
 Issues = "https://github.com/cmeans/pypi-winnow-downloads/issues"
+
+[tool.hatch.version]
+path = "pypi_winnow_downloads/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pypi_winnow_downloads"]
