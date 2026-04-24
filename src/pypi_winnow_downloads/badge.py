@@ -11,13 +11,19 @@ _LOW_COUNT_COLOR = "lightgrey"
 
 
 def format_count(n: int) -> str:
-    if n >= 1_000_000:
-        value, suffix = n / 1_000_000, "M"
-    elif n >= 1000:
-        value, suffix = n / 1000, "k"
-    else:
+    if n < 0:
+        raise ValueError(f"count must be non-negative, got {n}")
+    if n < 1000:
         return str(n)
+    # Round first, then decide the suffix — otherwise 999_999 would render
+    # as "1000.0k" because .1f rounds 999.999 up to 1000.0.
+    k_value = round(n / 1000, 1)
+    if k_value < 1000:
+        return _format_with_suffix(k_value, "k")
+    return _format_with_suffix(round(n / 1_000_000, 1), "M")
 
+
+def _format_with_suffix(value: float, suffix: str) -> str:
     if value == int(value):
         return f"{int(value)}{suffix}"
     return f"{value:.1f}{suffix}"

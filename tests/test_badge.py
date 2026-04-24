@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from pypi_winnow_downloads.badge import build_payload, format_count, write_badge
 
 
@@ -23,6 +25,33 @@ def test_format_count_uses_m_suffix_for_millions() -> None:
     assert format_count(1_000_000) == "1M"
 
 
+def test_format_count_rolls_over_from_k_to_m_on_rounding_boundary() -> None:
+    # 999_999 rounds up to 1000.0k which should promote to "1M", not show as "1000.0k".
+    assert format_count(999_999) == "1M"
+
+
+def test_format_count_rounds_k_suffix_to_whole_without_trailing_zero() -> None:
+    # 99_950 rounds to 100.0k — should render as "100k", not "100.0k".
+    assert format_count(99_950) == "100k"
+
+
+def test_format_count_rejects_negative_counts() -> None:
+    # Download counts are non-negative by definition. A negative value is a
+    # collector bug upstream; fail loudly rather than silently rendering "-5".
+    with pytest.raises(ValueError, match="non-negative"):
+        format_count(-5)
+
+
+def test_format_count_renders_zero_as_literal() -> None:
+    assert format_count(0) == "0"
+
+
+def test_format_count_at_literal_boundary_ten() -> None:
+    # 10 is the lightgrey/blue color threshold in build_payload; format itself
+    # doesn't care about the threshold, but pinning the value avoids surprises.
+    assert format_count(10) == "10"
+
+
 def test_build_payload_returns_shields_io_endpoint_structure() -> None:
     payload = build_payload(count=12300, label="non-CI downloads")
 
@@ -39,6 +68,13 @@ def test_build_payload_uses_lightgrey_for_low_counts() -> None:
 
     assert payload["color"] == "lightgrey"
     assert payload["message"] == "5"
+
+
+def test_build_payload_at_lightgrey_boundary_is_blue() -> None:
+    # count < 10 -> lightgrey, count == 10 -> blue. Pin the exact threshold
+    # so off-by-one regressions surface immediately.
+    payload = build_payload(count=10, label="non-CI downloads")
+    assert payload["color"] == "blue"
 
 
 def test_write_badge_writes_json_payload_to_path(tmp_path: Path) -> None:
