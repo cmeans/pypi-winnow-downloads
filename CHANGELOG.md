@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial project scaffold: `pyproject.toml` (hatchling build, Python 3.11+,
-  PyYAML runtime dep, pytest/ruff dev extras, Apache-2.0 SPDX), `.gitignore`,
+  PyYAML runtime dep, pytest/ruff dev extras, Apache 2.0 license), `.gitignore`,
   `README.md` with a scope-describing summary, Keep-a-Changelog-format
   `CHANGELOG.md`, `CLAUDE.md` documenting the handoff workflow for future
   Claude Code sessions.
