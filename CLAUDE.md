@@ -2,51 +2,68 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Status: pre-implementation
+## Status
 
-As of the initial commit, the repo contains only `LICENSE`. No source, no `pyproject.toml`, no tests, no `deploy/` examples. There is nothing to build, run, or test yet. The first real change is gated on the workflow below.
+Implementation in progress against milestones M1–M6 defined in the planner's design doc. As of this writing:
+
+- Project scaffold, config module (`pypi_winnow_downloads.config`), badge module (`pypi_winnow_downloads.badge`), and stub `__main__` entry point are in place with tests.
+- CI/QA workflows and label automation are ported from `cmeans/mcp-clipboard` (PR #2 at the time of writing).
+- Deployment infrastructure (LXC CT 112 on Proxmox, Caddy config target, DDNS via ddclient, router port-forwards) is provisioned but the service is not yet deployed.
+- Remaining work: collector module (`pypinfo` subprocess + parse), real `__main__` orchestration, `deploy/` examples, publishing workflows validation, first release.
+
+Re-read this file's "Status" section on return; older versions of this doc described the repo as pre-implementation and that framing is stale.
 
 ## Authoritative context lives in Awareness, not in files
 
-The design, scope, deployment target, and acceptance criteria are **not** in this repo — they are in the Awareness MCP store. Before doing anything, fetch:
+The design, scope, deployment target, and acceptance criteria are **not** in this repo — they are in the Awareness MCP store. Before making decisions, fetch:
 
 - `handoff:pypi-winnow-downloads:2026-04-23:lean-v1` — the actionable summary
 - `project:pypi-winnow-downloads` — the why, landscape analysis, v1 scope boundaries, future-badge backlog
 - `config:gcp:pypi-winnow-downloads` — GCP project ID, service account, IAM roles, sandbox constraints
 - `secret-ref:pypi-winnow-downloads:bigquery-sa-key` — credential path + handling rules (pointer only; never read the key file into conversation)
+- `decision:pypi-winnow-downloads:*` — per-decision records (license, config format, HTTPS exposure, staleness, CI publishing, changelog, awareness dual-write)
+- `home-network:ip-assignment-convention` — LAN / Proxmox / DNS-server conventions
+- `dns:intfar-com` — DNS provider + hosting details for the subdomain
+- `er605-router-status` — home router model + port-forward UI conventions
 
-Query pattern: `get_knowledge(tags=["project:pypi-winnow-downloads"])` returns most of these in one call. Always re-read before acting — these entries get updated and the version in memory drifts.
+Query pattern: `get_knowledge(tags=["project:pypi-winnow-downloads"])` returns most project entries in one call. Always re-read before acting — these entries get updated and the version in memory drifts.
 
-## MANDATORY workflow: planner first, implementation second
+## Workflow: planner-first has been satisfied; stay disciplined on subsequent work
 
-**Do not write implementation code on the first visit.** The handoff explicitly requires a planner sub-agent to produce a design document covering module layout, config schema, collector approach (shell `pypinfo` vs library), output layout, HTTP server choice (nginx vs Caddy — the only open deployment decision), staleness detection, badge copy, license, and phased milestones. Chris must approve the plan before any code lands.
+The planner sub-agent ran, produced a design document, and Chris approved it. Decisions from that review are captured in the `decision:*` Awareness entries. For new scope or changes that deviate from those decisions, **go back to the planner rather than silently redesigning**. The planner-first rule exists to prevent drift between what was approved and what ships; re-running it for meaningful design changes is cheap.
 
-If you find yourself reaching for `Write` on a `.py` file before a plan exists and has been approved, stop.
+If you find yourself reaching for `Write` on a `.py` file that introduces behavior outside what the design doc covers, stop and either ask or re-plan.
 
 ## Deployment target is pinned — do not re-litigate
 
-LXC container on Proxmox (Holodeck), systemd timer + service units inside the LXC. This is **resolved**, not a planner question. The repo ships deployment *examples* under `deploy/` (systemd units, nginx-or-Caddy config, Dockerfile) with placeholder paths — never Chris-specific paths, hostnames, or credential locations. Chris's actual LXC setup lives in his homelab, not in this repo.
+LXC container on Proxmox (Holodeck), CT 112 at `192.168.200.112`, Debian 13 Trixie, systemd timer + service units inside the LXC. HTTP fronting via Caddy. Public DNS at `pypi-badges.intfar.com` (ZoneEdit, DDNS via `ddclient` in the LXC). Router port-forwards 80/443 to CT 112.
+
+The repo ships deployment *examples* under `deploy/` (systemd units, Caddy config, Dockerfile) with placeholder paths. Never Chris-specific paths, hostnames, or credential locations in the repo. Chris's actual LXC setup is his homelab, not the repo.
 
 ## Scope discipline
 
-This is a bounded weekend project competing for attention with mcp-awareness (pre-beta). If implementation reveals unexpected complexity that would turn it into a multi-weekend project, **stop and escalate to Chris** rather than expanding scope silently. The handoff's out-of-scope list (database, web framework, user-supplied package API, auth, backfill, web UI, additional badges) is a hard boundary.
+Bounded weekend project competing for attention with mcp-awareness (pre-beta). If implementation reveals unexpected complexity that would turn it into a multi-weekend project, **stop and escalate to Chris** rather than expanding scope silently. The handoff's out-of-scope list (database, web framework, user-supplied package API, auth, backfill, web UI, additional badges beyond the v1 hero) is a hard boundary.
 
 **Terminology is load-bearing:** downloads ≠ installs ≠ usage. BigQuery measures downloads only. Badge copy and README must never promise more. See the "Downloads vs installs vs usage" section of `project:pypi-winnow-downloads`.
 
 ## License is resolved: Apache 2.0
 
-The repo ships **Apache 2.0** and that is the final choice, not a planner question. Chris's intent is maximum free availability — AGPL v3's network-use copyleft works against that goal. Do not re-open this decision or treat the project entry's older "AGPL v3 default" language as live guidance.
+The repo ships **Apache 2.0** and that is the final choice, not a planner question. Chris's intent is maximum free availability — AGPL v3's network-use copyleft works against that goal. Every `.py` file and `pyproject.toml` carries `# SPDX-License-Identifier: Apache-2.0` per the handoff's deliverables list; maintain that on any new file.
 
-## Pre-flight items Chris owns
+## Pre-flight (historical reference)
 
-Items 5, 6, and 7 of the pre-flight checklist are Chris's responsibility and may not be done yet when you arrive:
+All seven pre-flight items from the handoff are now complete:
 
-5. JSON credentials placed inside the LXC at the documented path
-6. Public HTTPS exposure decision (Tailscale Funnel vs existing reverse proxy)
-7. LXC container provisioned on Proxmox
+1. ✅ GitHub repo created
+2. ✅ GCP project created + BigQuery API enabled
+3. ✅ Service account with `BigQuery Job User` + `BigQuery Data Viewer`
+4. ✅ BigQuery-SA JSON credential generated (on Chris's workstation)
+5. ✅ Public HTTPS exposure decided — Caddy + ZoneEdit subdomain + DDNS
+6. ✅ Router port-forwards 80/443 → CT 112 configured
+7. ✅ LXC CT 112 provisioned on Proxmox
 
-Verify these are complete before attempting a live run, or surface clear instructions for Chris to complete them. Do not attempt to provision the LXC yourself.
+Credential transfer into the LXC is deferred until the collector's final service user + `/etc/pypi-winnow-downloads/` directory exist (the collector PR will handle it in one direct workstation → LXC hop).
 
 ## Updating awareness on completion
 
-On release, update `project:pypi-winnow-downloads` status from "Pre-flight in progress" to "Released v1" with release date, PyPI URL, and live badge URL. Write an `acted_on` record referencing the handoff entry. Suggest a LinkedIn post draft using the project entry's post-material notes.
+On release, update `project:pypi-winnow-downloads` status to "Released v1" with release date, PyPI URL, and live badge URL. Write an `acted_on` record referencing the handoff entry. Suggest a LinkedIn post draft using the project entry's post-material notes.
