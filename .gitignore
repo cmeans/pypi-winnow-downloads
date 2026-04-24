@@ -15,4 +15,3 @@ build/
 .mypy_cache/
 .DS_Store
 coverage.xml
-uv.lock

@@ -15,12 +15,19 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
-Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
+# Runner signature: (argv, env) -> CompletedProcess. Both args are always
+# passed by run_pypinfo so tests can assert on each independently.
+Runner = Callable[[Sequence[str], dict[str, str]], subprocess.CompletedProcess[str]]
 Clock = Callable[[], datetime]
 
 _BADGE_LABEL_TEMPLATE = "downloads ({days}d, non-CI)"
 _BADGE_FILENAME_TEMPLATE = "downloads-{days}d-non-ci.json"
 _HEALTH_FILENAME = "_health.json"
+# pypinfo's own --timeout default is 120s. Pad to 180s so the BigQuery
+# call has its own budget plus startup/teardown overhead before our outer
+# subprocess.run() abort kicks in. A subprocess hang here would otherwise
+# block the systemd timer's next firing.
+_DEFAULT_PYPINFO_TIMEOUT_SECONDS = 180
 
 
 class CollectorError(Exception):
@@ -50,8 +57,15 @@ class CollectorResult:
         return tuple(o for o in self.outcomes if not o.ok)
 
 
-def _default_runner(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(list(argv), check=False, capture_output=True, text=True)
+def _default_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(argv),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_DEFAULT_PYPINFO_TIMEOUT_SECONDS,
+    )
 
 
 def _default_clock() -> datetime:
@@ -65,18 +79,26 @@ def run_pypinfo(
     credential_file: Path,
     runner: Runner = _default_runner,
 ) -> int:
+    # Note: do NOT pass `-a/--auth <path>` on argv. pypinfo (cli.py:130-133)
+    # short-circuits to a credential-setter path when --auth is present and
+    # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
+    # pypinfo's core.py reads via os.environ.get on the no-flag path.
     argv = [
         "pypinfo",
         "--json",
         "--days",
         str(window_days),
         "--all",
-        "-a",
-        str(credential_file),
         package,
         "ci",
     ]
-    result = runner(argv)
+    env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": str(credential_file)}
+
+    try:
+        result = runner(argv, env)
+    except subprocess.TimeoutExpired as e:
+        raise CollectorError(f"pypinfo timed out for {package!r} after {e.timeout}s") from e
+
     if result.returncode != 0:
         raise CollectorError(
             f"pypinfo exited {result.returncode} for {package!r}: {result.stderr.strip()}"
@@ -93,7 +115,14 @@ def run_pypinfo(
     total = 0
     for row in rows:
         if not isinstance(row, dict):
-            continue
+            raise CollectorError(
+                f"pypinfo row for {package!r} has unexpected shape (not a dict): {row!r}"
+            )
+        # pypinfo emits ci as the *string* "True" / "False" / "None" — BigQuery
+        # cell values are passed through str() in pypinfo's parse_query_result.
+        # If a future pypinfo version emits a native bool/None instead, this
+        # comparison would silently flip and start counting CI traffic as
+        # non-CI; the non-dict-row guard above catches schema breaks loudly.
         if row.get("ci") == "True":
             continue
         count = row.get("download_count", 0)
@@ -115,22 +144,26 @@ def collect(
     outcomes: list[PackageOutcome] = []
 
     for pkg in config.packages:
-        try:
-            count = run_pypinfo(
-                pkg.name,
-                pkg.window_days,
-                credential_file=config.service.credential_file,
-                runner=runner,
-            )
-        except CollectorError as e:
-            logger.error("collector: %s", e)
-            outcomes.append(
-                PackageOutcome(
-                    package=pkg.name, window_days=pkg.window_days, count=None, error=str(e)
-                )
-            )
-            continue
+        outcome = _collect_one(pkg, config, runner)
+        outcomes.append(outcome)
 
+    finished = clock()
+    _write_health(config.service.output_dir, started, finished, outcomes)
+    return CollectorResult(started=started, finished=finished, outcomes=tuple(outcomes))
+
+
+def _collect_one(
+    pkg: Any,  # PackageConfig — typed Any here to avoid the runtime import dance
+    config: Config,
+    runner: Runner,
+) -> PackageOutcome:
+    try:
+        count = run_pypinfo(
+            pkg.name,
+            pkg.window_days,
+            credential_file=config.service.credential_file,
+            runner=runner,
+        )
         badge_path = (
             config.service.output_dir
             / pkg.name
@@ -140,14 +173,18 @@ def collect(
             count=count, label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days)
         )
         badge.write_badge(path=badge_path, payload=payload)
-        logger.info(
-            "collector: wrote badge for %s (count=%d, path=%s)", pkg.name, count, badge_path
+    except (CollectorError, OSError) as e:
+        # Per-package isolation: a single package's BigQuery failure or disk
+        # write failure must not abort the whole run, and must not skip the
+        # _health.json write. Operators rely on _health.json as the single
+        # diagnostic surface for the v1 staleness mechanism.
+        logger.error("collector: %s", e)
+        return PackageOutcome(
+            package=pkg.name, window_days=pkg.window_days, count=None, error=str(e)
         )
-        outcomes.append(PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count))
 
-    finished = clock()
-    _write_health(config.service.output_dir, started, finished, outcomes)
-    return CollectorResult(started=started, finished=finished, outcomes=tuple(outcomes))
+    logger.info("collector: wrote badge for %s (count=%d, path=%s)", pkg.name, count, badge_path)
+    return PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count)
 
 
 def _write_health(

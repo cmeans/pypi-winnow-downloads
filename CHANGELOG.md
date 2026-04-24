@@ -59,5 +59,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placeholder paths, the three initial target packages
   (`mcp-clipboard`, `mcp-synology`, `yt-dont-recommend`), and commented
   explanations of each field.
+- `uv.lock` committed at the repo root for reproducible deploys (per
+  `decision:pypi-winnow-downloads:uv-lock`). The lockfile is not packaged
+  into the wheel — PyPI consumers still resolve freshly against
+  `pyproject.toml`.
+
+### Fixed
+
+- `run_pypinfo` no longer passes `-a/--auth` on `argv`. pypinfo 23.0.0
+  short-circuits at `cli.py:130-133` when `--auth` is present — it sets the
+  credential location and returns without running the query, regardless of
+  the positional `<project> <fields>` arguments. The collector now passes
+  the credential path via the `GOOGLE_APPLICATION_CREDENTIALS` env var,
+  which pypinfo's `core.py` reads on the no-flag path. Tests gain a
+  real-`subprocess.run` integration test (using a fake `pypinfo` shim on
+  PATH) so the same class of bug recurs.
+- `collect()` now wraps both `run_pypinfo` and `badge.write_badge` in the
+  per-package try block. An IOError during the badge write (read-only
+  output dir, disk full, perms) becomes a recorded outcome rather than
+  propagating out of `collect()` and skipping the `_health.json` write.
+- `_default_runner` runs `subprocess.run` with `timeout=180` (1.5× pypinfo's
+  own 120s query timeout). On `subprocess.TimeoutExpired`, `run_pypinfo`
+  raises `CollectorError` with the elapsed timeout, so a hung child cannot
+  block the systemd timer's next firing.
+- Non-dict rows in pypinfo's JSON output now raise `CollectorError`
+  instead of being silently skipped. Silent skipping would mask upstream
+  schema breaks; loud failure surfaces them at the collector boundary.
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD
