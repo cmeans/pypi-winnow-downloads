@@ -55,11 +55,7 @@ def test_load_config_parses_multiple_packages_with_differing_windows(tmp_path: P
 
 def test_load_config_raises_on_missing_service_section(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        "packages:\n"
-        "  - name: mcp-clipboard\n"
-        "    window_days: 30\n"
-    )
+    config_path.write_text("packages:\n  - name: mcp-clipboard\n    window_days: 30\n")
 
     with pytest.raises(ConfigError, match="missing required section 'service'"):
         load_config(config_path)

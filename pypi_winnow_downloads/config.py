@@ -49,8 +49,7 @@ def load_config(path: Path) -> Config:
     )
 
     packages = tuple(
-        PackageConfig(name=p["name"], window_days=int(p["window_days"]))
-        for p in packages_raw
+        PackageConfig(name=p["name"], window_days=int(p["window_days"])) for p in packages_raw
     )
 
     return Config(service=service, packages=packages)
