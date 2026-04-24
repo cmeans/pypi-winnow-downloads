@@ -1,5 +1,8 @@
 """pypi-winnow-downloads — PyPI download badges filtered for non-CI traffic."""
 
-from importlib.metadata import version as _version
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = _version("pypi-winnow-downloads")
+try:
+    __version__ = version("pypi-winnow-downloads")
+except PackageNotFoundError:
+    __version__ = "0.0.0+dev"
