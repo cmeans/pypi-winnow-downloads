@@ -1,3 +1,5 @@
 """pypi-winnow-downloads — PyPI download badges filtered for non-CI traffic."""
 
-__version__ = "0.1.0.dev0"
+from importlib.metadata import version as _version
+
+__version__ = _version("pypi-winnow-downloads")
