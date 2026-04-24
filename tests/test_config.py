@@ -73,3 +73,94 @@ def test_load_config_raises_on_missing_packages_section(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="missing required section 'packages'"):
         load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_empty_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("")
+
+    with pytest.raises(ConfigError, match="empty"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_top_level_non_mapping(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("just a string\n")
+
+    with pytest.raises(ConfigError, match="top-level"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_missing_inner_service_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: 3\n"
+        "packages:\n"
+        "  - name: mcp-clipboard\n"
+        "    window_days: 30\n"
+    )
+
+    with pytest.raises(ConfigError, match="service.output_dir"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_non_int_stale_threshold(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir: /tmp/out\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: three\n"
+        "packages:\n"
+        "  - name: mcp-clipboard\n"
+        "    window_days: 30\n"
+    )
+
+    with pytest.raises(ConfigError, match="service.stale_threshold_days"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_packages_null_body(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir: /tmp/out\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: 3\n"
+        "packages:\n"
+    )
+
+    with pytest.raises(ConfigError, match="packages"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_missing_inner_package_field(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir: /tmp/out\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: 3\n"
+        "packages:\n"
+        "  - window_days: 30\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"packages\[0\]\.name"):
+        load_config(config_path)
+
+
+def test_load_config_accepts_empty_packages_list(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir: /tmp/out\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: 3\n"
+        "packages: []\n"
+    )
+
+    config = load_config(config_path)
+
+    assert config.packages == ()
