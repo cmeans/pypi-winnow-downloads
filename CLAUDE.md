@@ -48,7 +48,7 @@ Bounded weekend project competing for attention with mcp-awareness (pre-beta). I
 
 ## License is resolved: Apache 2.0
 
-The repo ships **Apache 2.0** and that is the final choice, not a planner question. Chris's intent is maximum free availability — AGPL v3's network-use copyleft works against that goal. Every `.py` file and `pyproject.toml` carries `# SPDX-License-Identifier: Apache-2.0` per the handoff's deliverables list; maintain that on any new file.
+The repo ships **Apache 2.0** and that is the final choice, not a planner question. Chris's intent is maximum free availability — AGPL v3's network-use copyleft works against that goal. License declaration lives in `pyproject.toml` as `license = "Apache-2.0"` (PEP 639 SPDX expression); **do not add per-file `# SPDX-License-Identifier` comments** — those are the convention for AGPL/GPL projects where the per-file license claim matters legally, and are redundant noise for Apache 2.0.
 
 ## Pre-flight (historical reference)
 

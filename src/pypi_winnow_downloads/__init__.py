@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
 """pypi-winnow-downloads — PyPI download badges filtered for non-CI traffic."""
 
 from importlib.metadata import PackageNotFoundError, version

@@ -30,7 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stub `pypi_winnow_downloads.__main__` so the `winnow-collect` console
   script installs and exits cleanly instead of raising `ModuleNotFoundError`
   before the real CLI lands.
-- `SPDX-License-Identifier: Apache-2.0` header on `pyproject.toml` and all
-  `.py` files.
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD

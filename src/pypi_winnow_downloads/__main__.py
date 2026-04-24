@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
 """Stub entry point. Real implementation lands in a follow-up PR."""
 
 import sys
