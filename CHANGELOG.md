@@ -80,9 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Persistent=true`. `deploy/caddy/Caddyfile.example` serves the output
   directory over HTTPS via Let's Encrypt automatic provisioning, with
   CORS + `Cache-Control: public, max-age=3600` for the badge JSON.
-  `deploy/docker/Dockerfile` is a multi-stage build (uv `sync --frozen`
-  against the committed lockfile, runtime stage runs as a non-root
-  `winnow` user). `deploy/docker/compose.yml.example` pairs the collector
+  `deploy/docker/Dockerfile` is a multi-stage build (uv
+  `sync --frozen --no-dev --no-editable` against the committed lockfile;
+  `--no-editable` is load-bearing because uv's default editable install
+  embeds `/src/src` into a `.pth` file, which dangles in the runtime
+  stage after `COPY --from=build`). The runtime stage runs as a non-root
+  `winnow` user. `deploy/docker/compose.yml.example` pairs the collector
   (one-shot, `run-once` profile) with Caddy (long-running) sharing a
   named volume; host scheduling drives the collector since Compose has
   no native scheduler.

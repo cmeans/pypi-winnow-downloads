@@ -33,6 +33,12 @@ services:
     # collector on its own — host scheduling drives it instead.
     profiles: [run-once]
 
+  # Note: caddy intentionally does NOT depend_on the collector.
+  # `depends_on` without a healthcheck only sequences container start,
+  # not data readiness; your first scheduled `docker compose run` is
+  # what populates the badge_output volume. Until then Caddy will serve
+  # 404s for badge paths, which shields.io renders as an error state —
+  # the correct signal for a not-yet-collected package.
   caddy:
     image: caddy:2
     ports:
@@ -48,12 +54,6 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
-    depends_on:
-      # The collector needs to have produced at least one badge file
-      # before Caddy can usefully serve. depends_on without a healthcheck
-      # only sequences container start, not collection completion — your
-      # first scheduled `docker compose run` is what populates the volume.
-      []
 
 volumes:
   badge_output:

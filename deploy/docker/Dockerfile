@@ -27,8 +27,13 @@ COPY src ./src
 # Build the package + runtime deps into a venv at a known absolute path.
 # `--frozen` enforces uv.lock so a stale or missing lock fails the build
 # loudly. `--no-dev` skips the dev extras (pytest, ruff, mypy).
+# `--no-editable` is load-bearing: uv sync installs the project in
+# editable mode by default, which writes a .pth file pointing at
+# /src/src. That path does NOT exist in the runtime stage after
+# `COPY --from=build /opt/venv /opt/venv`, so the venv ships a dangling
+# import path and `import pypi_winnow_downloads` fails at startup.
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-editable
 
 # --- runtime stage ------------------------------------------------------
 FROM python:3.13-slim AS runtime
