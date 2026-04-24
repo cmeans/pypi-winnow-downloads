@@ -47,7 +47,7 @@ Repository = "https://github.com/cmeans/pypi-winnow-downloads"
 Issues = "https://github.com/cmeans/pypi-winnow-downloads/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pypi_winnow_downloads"]
+packages = ["src/pypi_winnow_downloads"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
