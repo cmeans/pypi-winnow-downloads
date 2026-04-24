@@ -29,6 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "PyYAML>=6.0",
+    "pypinfo>=20.0.0",
 ]
 
 [project.optional-dependencies]

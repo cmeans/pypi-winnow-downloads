@@ -39,5 +39,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   typecheck job resolves.
 - README badge row including a self-hosted "non-CI downloads" badge
   (dogfood — goes live once M3 deploys the service).
+- `pypi_winnow_downloads.collector` module — shells out to `pypinfo` via
+  `subprocess.run` with an injectable runner for testability. `run_pypinfo`
+  invokes `pypinfo --json --days <N> --all -a <creds> <pkg> ci`, parses the
+  JSON `rows`, and sums `download_count` across rows where `ci != "True"`.
+  `collect(config)` iterates the configured packages, writes one shields.io
+  endpoint JSON per package at
+  `<output_dir>/<package>/downloads-<window>d-non-ci.json`, and writes a
+  `_health.json` record at the output-dir root with `started` / `finished`
+  timestamps plus per-package counts or errors. Single-package failures do
+  not stop the run — they surface in the health file and in the returned
+  `CollectorResult.failures` tuple.
+- Real `winnow-collect` CLI in `pypi_winnow_downloads.__main__`: argparse
+  entry point accepting `--config <path>` and `--verbose/-v`, loading the
+  YAML config, invoking `collector.collect()`, and exiting non-zero with a
+  package-name list if any package failed.
+- `pypinfo>=20.0.0` added as a runtime dependency.
+- `config.example.yaml` at the repo root — a minimal working config with
+  placeholder paths, the three initial target packages
+  (`mcp-clipboard`, `mcp-synology`, `yt-dont-recommend`), and commented
+  explanations of each field.
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD
