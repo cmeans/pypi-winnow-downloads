@@ -42,7 +42,14 @@ def _require_field(mapping: Any, parent_path: str, field: str) -> Any:
         raise ConfigError(f"'{parent_path}' must be a mapping, got {type(mapping).__name__}")
     if field not in mapping:
         raise ConfigError(f"missing required field '{dotted}'")
-    return mapping[field]
+    value = mapping[field]
+    if value is None:
+        # YAML "key:" with no value parses to None. Accepting that silently
+        # would either crash downstream (e.g., Path(None)) or propagate None
+        # into the domain objects (e.g., PackageConfig(name=None)). Reject
+        # here with the same dotted-path contract as missing fields.
+        raise ConfigError(f"{dotted} must not be null")
+    return value
 
 
 def _to_int(value: Any, dotted_path: str) -> int:

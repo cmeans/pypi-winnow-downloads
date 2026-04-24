@@ -163,3 +163,51 @@ def test_load_config_accepts_empty_packages_list(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.packages == ()
+
+
+def test_load_config_raises_configerror_on_null_output_dir(tmp_path: Path) -> None:
+    # "output_dir:" with no value parses to None; currently Path(None) blows up
+    # with a raw TypeError. Should be a ConfigError with a dotted path instead.
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir:\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: 3\n"
+        "packages: []\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"service\.output_dir"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_null_credential_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir: /tmp/out\n"
+        "  credential_file:\n"
+        "  stale_threshold_days: 3\n"
+        "packages: []\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"service\.credential_file"):
+        load_config(config_path)
+
+
+def test_load_config_raises_configerror_on_null_package_name(tmp_path: Path) -> None:
+    # Pre-fix this was the worst case: name: null was SILENTLY accepted,
+    # producing PackageConfig(name=None, ...). Must raise ConfigError.
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        "  output_dir: /tmp/out\n"
+        "  credential_file: /tmp/gcp.json\n"
+        "  stale_threshold_days: 3\n"
+        "packages:\n"
+        "  - name:\n"
+        "    window_days: 30\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"packages\[0\]\.name"):
+        load_config(config_path)
