@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -29,7 +30,7 @@ class Config:
     packages: tuple[PackageConfig, ...]
 
 
-def _require(raw: dict, key: str) -> object:
+def _require(raw: dict[str, Any], key: str) -> Any:
     if key not in raw:
         raise ConfigError(f"missing required section '{key}'")
     return raw[key]
