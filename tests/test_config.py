@@ -102,7 +102,7 @@ def test_load_config_raises_configerror_on_missing_inner_service_field(tmp_path:
         "    window_days: 30\n"
     )
 
-    with pytest.raises(ConfigError, match="service.output_dir"):
+    with pytest.raises(ConfigError, match=r"service\.output_dir"):
         load_config(config_path)
 
 
@@ -118,7 +118,7 @@ def test_load_config_raises_configerror_on_non_int_stale_threshold(tmp_path: Pat
         "    window_days: 30\n"
     )
 
-    with pytest.raises(ConfigError, match="service.stale_threshold_days"):
+    with pytest.raises(ConfigError, match=r"service\.stale_threshold_days"):
         load_config(config_path)
 
 
