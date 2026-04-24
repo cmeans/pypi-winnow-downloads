@@ -41,10 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (dogfood — goes live once M3 deploys the service).
 - `pypi_winnow_downloads.collector` module — shells out to `pypinfo` via
   `subprocess.run` with an injectable runner for testability. `run_pypinfo`
-  invokes `pypinfo --json --days <N> --all -a <creds> <pkg> ci`, parses the
-  JSON `rows`, and sums `download_count` across rows where `ci != "True"`.
-  `collect(config)` iterates the configured packages, writes one shields.io
-  endpoint JSON per package at
+  invokes `pypinfo --json --days <N> --all <pkg> ci` and passes the
+  service-account credential via the `GOOGLE_APPLICATION_CREDENTIALS` env
+  var (pypinfo's `core.py` reads it on the no-flag path; passing
+  `-a/--auth` on the command line short-circuits pypinfo to a
+  credential-setter mode and would prevent the query from running).
+  `XDG_DATA_HOME` is also redirected to a per-invocation
+  `tempfile.TemporaryDirectory` so pypinfo's persisted-credential TinyDB
+  (`platformdirs.user_data_dir('pypinfo')/db.json`, which would otherwise
+  take priority over the env var) starts empty for every run. `run_pypinfo`
+  parses the JSON `rows` and sums `download_count` across rows where
+  `ci != "True"`. `collect(config)` iterates the configured packages,
+  writes one shields.io endpoint JSON per package at
   `<output_dir>/<package>/downloads-<window>d-non-ci.json`, and writes a
   `_health.json` record at the output-dir root with `started` / `finished`
   timestamps plus per-package counts or errors. Single-package failures do
@@ -85,5 +93,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-dict rows in pypinfo's JSON output now raise `CollectorError`
   instead of being silently skipped. Silent skipping would mask upstream
   schema breaks; loud failure surfaces them at the collector boundary.
+- `run_pypinfo` redirects `XDG_DATA_HOME` to a per-invocation
+  `tempfile.TemporaryDirectory` so pypinfo's `get_credentials()`
+  (`db.py:23-26` via `cli.py:171`, with `core.py:56` falling back via
+  `creds_file or os.environ.get(...)`) cannot let a persisted-credential
+  TinyDB at `platformdirs.user_data_dir('pypinfo')/db.json` take priority
+  over `GOOGLE_APPLICATION_CREDENTIALS`. Without this, on any host where
+  `pypinfo -a <path>` had been run manually (a developer workstation, a
+  shared box), the env var would be silently ignored and a stale persisted
+  path would be used. Tests gain an integration test that pre-populates a
+  polluted DB at the test process's `XDG_DATA_HOME` and asserts the env
+  var still wins — exercising pypinfo's actual priority order, not just
+  env transmission.
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD

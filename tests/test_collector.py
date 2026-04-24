@@ -115,6 +115,78 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
     assert "ci" in argv_parts
 
 
+def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real pypinfo's `get_credentials()` reads a persisted credential path
+    from `platformdirs.user_data_dir('pypinfo')/db.json`, and only falls
+    back to `GOOGLE_APPLICATION_CREDENTIALS` when that DB is empty
+    (`cli.py:171` -> `db.py:23-26` -> `core.py:56`). On any workstation
+    where `pypinfo -a <path>` has been run, the env var is silently ignored.
+
+    This test mimics that priority order in the fake shim and pre-populates
+    the persisted DB at the *test process's* `XDG_DATA_HOME`. Without
+    `run_pypinfo` overriding `XDG_DATA_HOME` for the subprocess, the
+    polluted path wins and the test fails. With the override in place,
+    `XDG_DATA_HOME` points at a fresh empty dir for the subprocess, the
+    fake's TinyDB read returns nothing, and the env var fallback supplies
+    the expected credential — proving the actual priority bug is
+    neutralized, not just that env reaches the child.
+    """
+    polluted_xdg = tmp_path / "polluted-xdg"
+    (polluted_xdg / "pypinfo").mkdir(parents=True)
+    (polluted_xdg / "pypinfo" / "db.json").write_text(
+        '{"credentials": {"1": {"path": "/wrong/path/from/persisted/db.json"}}}'
+    )
+    monkeypatch.setenv("XDG_DATA_HOME", str(polluted_xdg))
+
+    obs_creds = tmp_path / "obs-creds.txt"
+    fake = tmp_path / "pypinfo"
+    fake.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/env python3
+            # Mimic real pypinfo's get_credentials() priority order:
+            # TinyDB first, GOOGLE_APPLICATION_CREDENTIALS as fallback.
+            import json, os
+            xdg = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+            db_path = os.path.join(xdg, "pypinfo", "db.json")
+            persisted = None
+            if os.path.exists(db_path):
+                with open(db_path) as f:
+                    data = json.load(f)
+                for table in data.values():
+                    for entry in table.values():
+                        if isinstance(entry, dict) and "path" in entry:
+                            persisted = entry["path"]
+                            break
+                    if persisted:
+                        break
+            creds = persisted or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            with open({str(obs_creds)!r}, "w") as f:
+                f.write(creds or "<NONE>")
+            print(json.dumps({{
+                "rows": [{{"ci": "False", "download_count": 1}}],
+                "query": {{}},
+            }}))
+            """
+        )
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    expected_creds = tmp_path / "expected-creds.json"
+    expected_creds.write_text("{}")
+
+    count = run_pypinfo("pkg", 30, credential_file=expected_creds)
+
+    assert count == 1
+    assert obs_creds.read_text() == str(expected_creds), (
+        "pypinfo's persisted db.json took priority over GOOGLE_APPLICATION_CREDENTIALS — "
+        "XDG_DATA_HOME isolation in run_pypinfo is missing or broken"
+    )
+
+
 def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> None:
     stdout = json.dumps(
         {

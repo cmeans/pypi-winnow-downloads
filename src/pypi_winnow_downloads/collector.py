@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import badge
-from .config import Config
+from .config import Config, PackageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +93,27 @@ def run_pypinfo(
         package,
         "ci",
     ]
-    env = {**os.environ, "GOOGLE_APPLICATION_CREDENTIALS": str(credential_file)}
 
-    try:
-        result = runner(argv, env)
-    except subprocess.TimeoutExpired as e:
-        raise CollectorError(f"pypinfo timed out for {package!r} after {e.timeout}s") from e
+    # XDG_DATA_HOME isolation: pypinfo's get_credentials() (db.py:23-26 via
+    # cli.py:171) reads a persisted credential path from
+    # `platformdirs.user_data_dir('pypinfo')/db.json` and returns it from
+    # `creds_file or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')`
+    # (core.py:56) — left-to-right `or` means a persisted path wins and the
+    # env var is silently ignored. On any host where `pypinfo -a <path>` has
+    # been run manually, that's a foot-gun. Pointing XDG_DATA_HOME at a
+    # fresh empty dir per invocation makes pypinfo's TinyDB query return
+    # None so the env-var fallback supplies the credential.
+    with tempfile.TemporaryDirectory(prefix="pypi-winnow-pypinfo-state-") as state_dir:
+        env = {
+            **os.environ,
+            "GOOGLE_APPLICATION_CREDENTIALS": str(credential_file),
+            "XDG_DATA_HOME": state_dir,
+        }
+
+        try:
+            result = runner(argv, env)
+        except subprocess.TimeoutExpired as e:
+            raise CollectorError(f"pypinfo timed out for {package!r} after {e.timeout}s") from e
 
     if result.returncode != 0:
         raise CollectorError(
@@ -153,7 +169,7 @@ def collect(
 
 
 def _collect_one(
-    pkg: Any,  # PackageConfig — typed Any here to avoid the runtime import dance
+    pkg: PackageConfig,
     config: Config,
     runner: Runner,
 ) -> PackageOutcome:
