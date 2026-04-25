@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where readers expect it. Cross-file links use absolute GitHub URLs
   so they don't 404 on the PyPI project page (the README is also
   `pyproject.toml`'s `long_description`).
+- README's `## Install` section now points new users at pypinfo's
+  installation guide for the GCP credential setup (create a project,
+  enable the BigQuery API, generate the service-account JSON), since
+  every install needs that JSON before `winnow-collect` will run.
+  Avoids reproducing pypinfo's 18-step walkthrough here while still
+  closing the obvious onboarding gap.
 
 ## [0.1.0] - 2026-04-24
 

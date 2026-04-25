@@ -53,6 +53,15 @@ for a project whose pitch is honesty.
 pip install pypi-winnow-downloads
 ```
 
+The collector queries Google's public PyPI BigQuery dataset via
+`pypinfo`, so before the first run you'll need a Google Cloud service
+account JSON key with the `BigQuery Job User` and `BigQuery Data
+Viewer` roles. Pypinfo's
+[installation guide](https://github.com/ofek/pypinfo#installation)
+walks the full setup (create a GCP project, enable the BigQuery API,
+generate the JSON key); then point `service.credential_file` in your
+config at the resulting file.
+
 Run with a YAML config — copy
 [`config.example.yaml`](https://github.com/cmeans/pypi-winnow-downloads/blob/main/config.example.yaml)
 and edit:
