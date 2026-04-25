@@ -68,6 +68,7 @@ output directory, see
 ## Status
 
 Alpha. Self-hosted reference deployment running at
-`pypi-badges.intfar.com`, producing daily badges for three target
-packages. Expect rough edges and possible breaking changes in the 0.x
-series.
+`pypi-badges.intfar.com`, producing daily badges for four target
+packages (the three seed packages in `config.example.yaml` plus
+`pypi-winnow-downloads` itself for the dogfood badge). Expect rough
+edges and possible breaking changes in the 0.x series.
