@@ -53,6 +53,17 @@ for a project whose pitch is honesty.
 pip install pypi-winnow-downloads
 ```
 
+The collector queries Google's public PyPI BigQuery dataset via
+`pypinfo`, so before the first run you'll need a Google Cloud service
+account JSON key. Pypinfo's
+[installation guide](https://github.com/ofek/pypinfo#installation)
+walks the full setup (create a GCP project, enable the BigQuery API,
+generate the JSON key) and recommends the broad `BigQuery User` role;
+the narrower pair `BigQuery Job User` + `BigQuery Data Viewer` also
+works and is what `config.example.yaml` and the reference deploy
+document. Then point `service.credential_file` in your config at the
+resulting file.
+
 Run with a YAML config — copy
 [`config.example.yaml`](https://github.com/cmeans/pypi-winnow-downloads/blob/main/config.example.yaml)
 and edit:
@@ -72,3 +83,34 @@ Alpha. Self-hosted reference deployment running at
 packages (the three seed packages in `config.example.yaml` plus
 `pypi-winnow-downloads` itself for the dogfood badge). Expect rough
 edges and possible breaking changes in the 0.x series.
+
+## Acknowledgments
+
+This project rests on three pieces of upstream work:
+
+- [pypinfo](https://github.com/ofek/pypinfo) by Ofek Lev: the BigQuery
+  query layer for the PyPI download dataset. `pypi-winnow-downloads` is
+  essentially a filter and badge writer wrapped around pypinfo.
+- [shields.io](https://shields.io/) renders the endpoint badges. The
+  collector emits the JSON shape that shields.io's
+  [endpoint badge](https://shields.io/badges/endpoint-badge) consumes,
+  so badges inherit its caching, theming, and SVG rendering.
+- The [`bigquery-public-data.pypi.file_downloads`](https://docs.pypi.org/api/bigquery/)
+  dataset, hosted by Google as a public BigQuery dataset and populated
+  by the PyPI Linehaul pipeline, is the underlying data source.
+  Without it, no installer-level breakdown of PyPI downloads would be
+  possible.
+
+Designed and built collaboratively with
+[Claude Code](https://claude.com/claude-code) (Anthropic) across
+planning, implementation, review, and QA. Significant subsystems (the
+pypinfo `XDG_DATA_HOME` isolation, the `sys.executable`-based pypinfo
+resolver, the installer-allowlist filter, the deploy/ examples)
+emerged through that planner / Dev / QA loop.
+
+## License
+
+Licensed under the
+[Apache License, Version 2.0](https://github.com/cmeans/pypi-winnow-downloads/blob/main/LICENSE).
+
+© 2026 Chris Means.
