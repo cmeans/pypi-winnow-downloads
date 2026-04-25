@@ -49,8 +49,8 @@ body:
       label: Scope check
       description: |
         v1 deliberately excludes a database, web framework, user-supplied
-        package API, auth, backfill, and a web UI (see the README's
-        Status section). If your idea touches any of these, briefly note
-        why it's still in scope or what scope expansion you're proposing.
+        package API, auth, backfill, and a web UI. If your idea touches
+        any of these, briefly note why it's still in scope or what scope
+        expansion you're proposing.
     validations:
       required: false
