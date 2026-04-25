@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hero metric definition tightened.** The badge now counts only downloads
+  whose `details.installer.name` is one of `pip`, `uv`, `poetry`, `pdm`,
+  `pipenv`, or `pipx` (the interactive Python packaging-tool family) — in
+  addition to the existing `details.ci != True` filter. Mirror traffic
+  (`bandersnatch`, `Nexus`, `devpi`, `Artifactory`, `z3c.pypimirror`),
+  browser fetches via the PyPI web UI, generic HTTP UAs (`requests`, `curl`),
+  and uncategorised installer rows are now excluded. **This is a breaking
+  change to the metric**: badge values for any deployed instance will drop
+  on next collector run (often substantially — for one v1 seed package
+  bandersnatch alone accounted for 48% of the previous count). The filter
+  is **fail-closed**: a future pypinfo emitting a new installer name will
+  be excluded until the allowlist in `collector.py` is updated explicitly.
+- **Badge label** changed from `downloads (Nd, non-CI)` to
+  `pip*/uv/poetry/pdm (Nd)` to make the new filter visible at the badge
+  surface (the asterisk on `pip*` denotes the pip-derived family — pip
+  itself plus pipenv and pipx). Output filename
+  (`<pkg>/downloads-Nd-non-ci.json`) is unchanged so existing endpoint
+  URLs continue to resolve.
+- `run_pypinfo` argv now pivots by both `ci` AND `installer` (was just
+  `ci`); JSON rows gain an `installer_name` field that the parser uses
+  for the allowlist filter. Missing `installer_name` raises
+  `CollectorError` (loud schema-break detection).
+
 ### Added
 
 - Initial project scaffold: `pyproject.toml` (hatchling build, Python 3.11+,

@@ -37,8 +37,10 @@ def test_run_pypinfo_invokes_pypinfo_with_expected_argv(tmp_path: Path) -> None:
     assert argv[argv.index("--days") + 1] == "30"
     assert "--all" in argv
     assert "mypkg" in argv
-    # Pivot field comes after the package per pypinfo's positional convention.
-    assert argv.index("mypkg") < argv.index("ci")
+    # Pivot fields come after the package per pypinfo's positional convention.
+    # We pivot by both `ci` AND `installer` so we can filter out non-installer
+    # traffic (mirrors, browsers, scrapers) downstream.
+    assert argv.index("mypkg") < argv.index("ci") < argv.index("installer")
     # `-a` must NOT be in argv. With `-a` present, pypinfo short-circuits at
     # cli.py:130-133: it sets the credential location and returns without
     # running the query, regardless of positional args. The credential must
@@ -92,7 +94,8 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
                 f.write(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "<MISSING>"))
                 f.write("\\n")
                 f.write(",".join(sys.argv[1:]))
-            print(json.dumps({{"rows": [{{"ci": "False", "download_count": 11}}], "query": {{}}}}))
+            row = {{"ci": "False", "download_count": 11, "installer_name": "pip"}}
+            print(json.dumps({{"rows": [row], "query": {{}}}}))
             """
         )
     )
@@ -113,6 +116,7 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
     )
     assert "realpkg" in argv_parts
     assert "ci" in argv_parts
+    assert "installer" in argv_parts
 
 
 def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
@@ -166,7 +170,7 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
             with open({str(obs_creds)!r}, "w") as f:
                 f.write(creds or "<NONE>")
             print(json.dumps({{
-                "rows": [{{"ci": "False", "download_count": 1}}],
+                "rows": [{{"ci": "False", "download_count": 1, "installer_name": "pip"}}],
                 "query": {{}},
             }}))
             """
@@ -191,9 +195,9 @@ def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> No
     stdout = json.dumps(
         {
             "rows": [
-                {"ci": "True", "download_count": 900},
-                {"ci": "False", "download_count": 70},
-                {"ci": "None", "download_count": 25},
+                {"ci": "True", "download_count": 900, "installer_name": "pip"},
+                {"ci": "False", "download_count": 70, "installer_name": "pip"},
+                {"ci": "None", "download_count": 25, "installer_name": "pip"},
             ],
             "query": {},
         }
@@ -208,6 +212,132 @@ def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> No
     count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
     assert count == 95
+
+
+def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> None:
+    """The hero metric is 'real-developer downloads' — count only rows from
+    interactive packaging tools (pip, uv, poetry, pdm, pipenv, pipx). Mirror
+    traffic (bandersnatch, Nexus, devpi), browser fetches, scraper UAs
+    (requests, curl), and unknown installers ("None") are excluded.
+
+    Without this filter, mirrors alone can dominate small-package counts —
+    e.g., yt-dont-recommend's 30-day total at v1 was 2,771 with `--all`,
+    of which 1,325 (48%) was bandersnatch alone. The filter brings the
+    number to 14, which is the honest signal.
+    """
+    stdout = json.dumps(
+        {
+            "rows": [
+                # Allowlisted — counted
+                {"ci": "False", "download_count": 50, "installer_name": "pip"},
+                {"ci": "False", "download_count": 30, "installer_name": "uv"},
+                # Excluded — mirrors
+                {"ci": "False", "download_count": 1325, "installer_name": "bandersnatch"},
+                {"ci": "False", "download_count": 88, "installer_name": "Nexus"},
+                # Excluded — non-installer UAs / unknown
+                {"ci": "False", "download_count": 600, "installer_name": "Browser"},
+                {"ci": "False", "download_count": 266, "installer_name": "requests"},
+                {"ci": "False", "download_count": 1382, "installer_name": "None"},
+                # Excluded — even pip is dropped when ci=True
+                {"ci": "True", "download_count": 9999, "installer_name": "pip"},
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert count == 80, "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
+
+
+def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> None:
+    """All six interactive Python packaging tools count. If pypinfo ever
+    starts emitting a new mainstream installer (e.g. `rye` resurrected,
+    or some future tool), it'll need to be added to the allowlist
+    explicitly — the filter is fail-closed.
+    """
+    stdout = json.dumps(
+        {
+            "rows": [
+                {"ci": "False", "download_count": 1, "installer_name": "pip"},
+                {"ci": "False", "download_count": 2, "installer_name": "uv"},
+                {"ci": "False", "download_count": 4, "installer_name": "poetry"},
+                {"ci": "False", "download_count": 8, "installer_name": "pdm"},
+                {"ci": "False", "download_count": 16, "installer_name": "pipenv"},
+                {"ci": "False", "download_count": 32, "installer_name": "pipx"},
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert count == 63  # 1+2+4+8+16+32
+
+
+def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
+    """pypinfo emits installer_name as the lowercase string the BigQuery
+    schema records (`pip`, `uv`, `poetry`, ...). A capitalized variant
+    like `Pip` is not what real installer telemetry produces; if it
+    appears, it's a different category (some other UA reusing the name)
+    and should be excluded.
+    """
+    stdout = json.dumps(
+        {
+            "rows": [
+                {"ci": "False", "download_count": 100, "installer_name": "pip"},
+                {"ci": "False", "download_count": 999, "installer_name": "Pip"},
+                {"ci": "False", "download_count": 999, "installer_name": "PIP"},
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert count == 100, "case-mismatched variants must be excluded"
+
+
+def test_run_pypinfo_raises_on_missing_installer_name_field(tmp_path: Path) -> None:
+    """pypinfo always emits installer_name when we pass `installer` as a
+    pivot field. Its absence means pypinfo's column-naming convention
+    changed under us. Fail loud so we notice the schema drift instead of
+    silently undercounting (or worse, double-counting if some rows have
+    it and others don't).
+    """
+    stdout = json.dumps(
+        {
+            "rows": [{"ci": "False", "download_count": 50}],  # missing installer_name
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    with pytest.raises(CollectorError, match="installer_name"):
+        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
 
 def test_run_pypinfo_returns_zero_when_rows_empty(tmp_path: Path) -> None:
@@ -260,7 +390,13 @@ def test_run_pypinfo_raises_on_non_dict_row(tmp_path: Path) -> None:
     # Fail loudly so a future format break is caught at the collector boundary
     # rather than producing wrong (but plausible) counts.
     stdout = json.dumps(
-        {"rows": [{"ci": "False", "download_count": 7}, "unexpected-string-row"], "query": {}}
+        {
+            "rows": [
+                {"ci": "False", "download_count": 7, "installer_name": "pip"},
+                "unexpected-string-row",
+            ],
+            "query": {},
+        }
     )
 
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -306,8 +442,8 @@ def _fake_runner_for(counts_by_package: dict[str, int]):
         stdout = json.dumps(
             {
                 "rows": [
-                    {"ci": "True", "download_count": 10_000},
-                    {"ci": "False", "download_count": non_ci_count},
+                    {"ci": "True", "download_count": 10_000, "installer_name": "pip"},
+                    {"ci": "False", "download_count": non_ci_count, "installer_name": "pip"},
                 ],
                 "query": {},
             }
@@ -337,14 +473,14 @@ def test_collect_writes_badge_file_per_package_with_window_in_filename(tmp_path:
     clipboard_payload = json.loads(clipboard_badge.read_text())
     assert clipboard_payload == {
         "schemaVersion": 1,
-        "label": "downloads (30d, non-CI)",
+        "label": "pip*/uv/poetry/pdm (30d)",
         "message": "142",
         "color": "blue",
     }
 
     yt_payload = json.loads(yt_badge.read_text())
     assert yt_payload["message"] == "8"
-    assert yt_payload["label"] == "downloads (7d, non-CI)"
+    assert yt_payload["label"] == "pip*/uv/poetry/pdm (7d)"
     assert yt_payload["color"] == "lightgrey"
 
 
@@ -388,7 +524,12 @@ def test_collect_continues_past_single_package_failure(tmp_path: Path) -> None:
         return subprocess.CompletedProcess(
             argv,
             0,
-            stdout=json.dumps({"rows": [{"ci": "False", "download_count": 99}], "query": {}}),
+            stdout=json.dumps(
+                {
+                    "rows": [{"ci": "False", "download_count": 99, "installer_name": "pip"}],
+                    "query": {},
+                }
+            ),
             stderr="",
         )
 
