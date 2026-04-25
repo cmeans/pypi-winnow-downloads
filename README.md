@@ -5,14 +5,15 @@
 [![License](https://img.shields.io/pypi/l/pypi-winnow-downloads)](https://github.com/cmeans/pypi-winnow-downloads/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/cmeans/pypi-winnow-downloads/ci.yml?label=CI)](https://github.com/cmeans/pypi-winnow-downloads/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/cmeans/pypi-winnow-downloads/graph/badge.svg)](https://codecov.io/gh/cmeans/pypi-winnow-downloads)
-[![non-CI downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![pip*/uv/poetry/pdm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
 
 Self-hosted PyPI download badge service that winnows CI traffic out of download
 counts. Produces [shields.io](https://shields.io/endpoint)-compatible endpoint
-badges filtered by BigQuery's `details.ci` field — more honest than any existing
-alternative for small or young Python packages.
+badges filtered by BigQuery's `details.ci` flag *and* an interactive-installer
+allowlist (`pip`, `uv`, `poetry`, `pdm`, `pipenv`, `pipx`) — more honest than
+any existing alternative for small or young Python packages.
 
-> The "non-CI downloads" badge above is served by this project itself —
+> The `pip*/uv/poetry/pdm` badge above is served by this project itself —
 > eating our own dogfood. The endpoint went live with milestone M3 deployment
 > on 2026-04-24 and currently shows `0` until the first release lands on PyPI;
 > after that the count climbs automatically.
