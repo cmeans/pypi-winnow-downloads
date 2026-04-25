@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-24
+
 ### Changed
 
 - **README closing line retired.** The bare `Pre-alpha. Not yet usable.`
@@ -199,4 +201,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collector finds pypinfo via `sys.executable`'s neighbor instead of
   PATH.
 
-[Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD
+[Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/cmeans/pypi-winnow-downloads/releases/tag/v0.1.0
