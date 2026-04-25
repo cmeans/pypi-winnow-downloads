@@ -55,11 +55,12 @@ sudo /opt/pypi-winnow-downloads/bin/pip install pypi-winnow-downloads
 # or, from a local wheel:
 # sudo /opt/pypi-winnow-downloads/bin/pip install dist/pypi_winnow_downloads-<version>-py3-none-any.whl
 
-# Symlink both console scripts onto the system PATH. winnow-collect is the
-# CLI entry point; pypinfo is the BigQuery-query CLI the collector calls
-# as a subprocess (and therefore needs to be findable via PATH at runtime).
+# Symlink the CLI entry point onto the system PATH so the systemd unit's
+# ExecStart=/usr/local/bin/winnow-collect resolves. The collector finds
+# pypinfo via sys.executable's neighbor (no PATH dependency), so a
+# parallel pypinfo symlink isn't required — though you can add one if
+# you want pypinfo on your shell's PATH for ad-hoc queries.
 sudo ln -sf /opt/pypi-winnow-downloads/bin/winnow-collect /usr/local/bin/winnow-collect
-sudo ln -sf /opt/pypi-winnow-downloads/bin/pypinfo        /usr/local/bin/pypinfo
 
 # Service user + dirs.
 sudo useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/pypi-winnow-downloads winnow

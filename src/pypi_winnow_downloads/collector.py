@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -44,6 +45,23 @@ _INSTALLER_ALLOWLIST = frozenset({"pip", "uv", "poetry", "pdm", "pipenv", "pipx"
 # subprocess.run() abort kicks in. A subprocess hang here would otherwise
 # block the systemd timer's next firing.
 _DEFAULT_PYPINFO_TIMEOUT_SECONDS = 180
+
+# Console-script filename pypinfo installs as. Windows wheel installs
+# emit `.exe`; Unix-flavored installs emit no extension.
+_PYPINFO_BIN_NAME = "pypinfo.exe" if sys.platform == "win32" else "pypinfo"
+
+
+def _resolve_pypinfo_path() -> str:
+    """Absolute path to the pypinfo console script in the same venv as
+    the running Python interpreter. pypinfo is a runtime dependency so
+    its console script is installed alongside this package's; using the
+    absolute path skips PATH lookup entirely, which removes a class of
+    install-layout-dependent failures (systemd's stripped PATH not
+    including the venv bin, container PATH variants, pipx isolated
+    venvs, etc.). The function is module-level so tests can monkeypatch
+    it to point at a fake binary.
+    """
+    return str(Path(sys.executable).parent / _PYPINFO_BIN_NAME)
 
 
 class CollectorError(Exception):
@@ -100,7 +118,7 @@ def run_pypinfo(
     # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
     # pypinfo's core.py reads via os.environ.get on the no-flag path.
     argv = [
-        "pypinfo",
+        _resolve_pypinfo_path(),
         "--json",
         "--days",
         str(window_days),

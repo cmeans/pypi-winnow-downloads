@@ -31,6 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ci`); JSON rows gain an `installer_name` field that the parser uses
   for the allowlist filter. Missing `installer_name` raises
   `CollectorError` (loud schema-break detection).
+- **`pypinfo` resolved by absolute path, not PATH lookup.** The
+  collector now constructs argv[0] as
+  `Path(sys.executable).parent / "pypinfo"` via the new
+  `_resolve_pypinfo_path()` helper. pypinfo is a runtime dependency, so
+  its console script is installed alongside the running interpreter
+  regardless of layout (venv, system pip, pip --user, pipx isolated
+  venv, docker). Removes the dependency on `subprocess.run` finding
+  `pypinfo` via PATH, which was install-layout-fragile (notably broken
+  under systemd's stripped PATH at M3 deploy time). The `Environment=PATH=`
+  directive in `deploy/systemd/*.service` and the parallel `pypinfo`
+  symlink step in `deploy/README.md` are no longer required and have
+  been removed.
 
 ### Added
 
