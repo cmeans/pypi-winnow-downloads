@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `deploy/README.md` gains an `## Alternative HTTPS exposure:
+  Tailscale Funnel` section documenting [Tailscale
+  Funnel](https://tailscale.com/kb/1223/funnel) as a drop-in
+  replacement for the public-HTTPS layer (Caddy + Let's Encrypt +
+  DDNS + router port-forward). Free Personal-tier eligible; useful
+  for self-hosters behind CGNAT, on residential IPs that rotate, or
+  who'd rather not expose a home IP in public DNS. Documents the
+  trade-offs (`<device>.<tailnet>.ts.net` URL form locked to the
+  tailnet on the free plan; allowed public ports 443 / 8443 /
+  10000; non-configurable bandwidth limits) and ships a
+  five-command setup against `bare-systemd` runtime: install
+  tailscale, serve `output_dir` on `127.0.0.1:8443` via
+  `systemd-run`, `tailscale funnel --bg`, discover the URL, smoke
+  check. Cross-referenced from the **Pick an approach** section so
+  it's discoverable without reading the whole doc end-to-end. No
+  in-tree files specific to Funnel.
 - README gains `## Acknowledgments` (pypinfo, shields.io, the
   `bigquery-public-data.pypi.file_downloads` dataset, plus a
   development-collaboration credit to Claude Code) and `## License`
