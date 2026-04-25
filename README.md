@@ -89,6 +89,13 @@ This project rests on three pieces of upstream work:
   Linehaul pipeline, is the underlying data source. Without it, no
   installer-level breakdown of PyPI downloads would be possible.
 
+Designed and built collaboratively with
+[Claude Code](https://claude.com/claude-code) (Anthropic) across
+planning, implementation, review, and QA. Significant subsystems (the
+pypinfo `XDG_DATA_HOME` isolation, the `sys.executable`-based pypinfo
+resolver, the installer-allowlist filter, the deploy/ examples)
+emerged through that planner / Dev / QA loop.
+
 ## License
 
 Licensed under the

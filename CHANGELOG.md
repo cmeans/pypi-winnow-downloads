@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - README gains `## Acknowledgments` (pypinfo, shields.io, the
-  `bigquery-public-data.pypi.file_downloads` dataset) and `## License`
+  `bigquery-public-data.pypi.file_downloads` dataset, plus a
+  development-collaboration credit to Claude Code) and `## License`
   sections, plus a `© 2026 Chris Means` line. The repo has shipped
   Apache 2.0 from day one (declared in `pyproject.toml` and `LICENSE`);
   this just surfaces attribution and license at the README's footer
