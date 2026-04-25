@@ -23,7 +23,7 @@ flowchart LR
     Scheduler["scheduler<br/>(timer / cron / k8s CronJob)"] -->|"daily<br/>one-shot"| Collector["collector<br/>(winnow-collect)"]
     Collector -->|writes JSON| OutputDir[("output dir<br/>*.json + _health.json")]
     OutputDir -->|static HTTPS| Caddy
-    Caddy -->|fetches| ShieldsIO[shields.io]
+    Caddy -->|serves JSON| ShieldsIO[shields.io]
 ```
 
 ## Pick an approach
