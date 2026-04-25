@@ -49,18 +49,21 @@ for a project whose pitch is honesty.
 
 ## Install
 
-```
+```bash
 pip install pypi-winnow-downloads
 ```
 
-Run with a YAML config — copy [`config.example.yaml`](config.example.yaml) and edit:
+Run with a YAML config — copy
+[`config.example.yaml`](https://github.com/cmeans/pypi-winnow-downloads/blob/main/config.example.yaml)
+and edit:
 
-```
+```bash
 winnow-collect --config /path/to/config.yaml
 ```
 
 To deploy as a daily systemd timer plus a Caddy HTTPS service serving the
-output directory, see [`deploy/README.md`](deploy/README.md).
+output directory, see
+[`deploy/README.md`](https://github.com/cmeans/pypi-winnow-downloads/blob/main/deploy/README.md).
 
 ## Status
 
