@@ -84,10 +84,11 @@ This project rests on three pieces of upstream work:
   collector emits the JSON shape that shields.io's
   [endpoint badge](https://shields.io/badges/endpoint-badge) consumes,
   so badges inherit its caching, theming, and SVG rendering.
-- The `bigquery-public-data.pypi.file_downloads` dataset, hosted by
-  Google as a public BigQuery dataset and populated by the PyPI
-  Linehaul pipeline, is the underlying data source. Without it, no
-  installer-level breakdown of PyPI downloads would be possible.
+- The [`bigquery-public-data.pypi.file_downloads`](https://docs.pypi.org/api/bigquery/)
+  dataset, hosted by Google as a public BigQuery dataset and populated
+  by the PyPI Linehaul pipeline, is the underlying data source.
+  Without it, no installer-level breakdown of PyPI downloads would be
+  possible.
 
 Designed and built collaboratively with
 [Claude Code](https://claude.com/claude-code) (Anthropic) across
