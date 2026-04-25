@@ -106,24 +106,59 @@ def _default_clock() -> datetime:
     return datetime.now(UTC)
 
 
-def run_pypinfo(
-    package: str,
+def run_pypinfo_batch(
+    packages: Sequence[str],
     window_days: int,
     *,
     credential_file: Path,
     runner: Runner = _default_runner,
-) -> int:
-    # Note: do NOT pass `-a/--auth <path>` on argv. pypinfo (cli.py:130-133)
-    # short-circuits to a credential-setter path when --auth is present and
-    # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
-    # pypinfo's core.py reads via os.environ.get on the no-flag path.
+) -> dict[str, int]:
+    """Query BigQuery for non-CI, allowlisted-installer downloads of EVERY
+    package in *packages* over the same *window_days* window, in a single
+    pypinfo invocation. Returns a `{package: count}` dict; packages with
+    zero downloads in the window appear in the dict with count=0.
+
+    The batching is the cost lever for hosting many packages: BigQuery
+    bills for partition + column scan, NOT for the size of the
+    `WHERE file.project IN (...)` list. So one call for N packages costs
+    the same as one call for a single package — `bytes_billed` stays
+    around 4-5 GB regardless of N. Hosting hundreds of packages on the
+    1 TB/month free tier becomes feasible only via this batched path.
+
+    Note: do NOT pass `-a/--auth <path>` on argv. pypinfo (cli.py:130-133)
+    short-circuits to a credential-setter path when --auth is present and
+    never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead.
+    """
+    if not packages:
+        return {}
+
+    # Build the WHERE-IN clause. Package names on PyPI are restricted to
+    # [A-Za-z0-9._-] (PEP 508), so they cannot contain quotes or other
+    # SQL-meaningful characters; a literal join with double quotes is
+    # safe. Belt-and-braces: reject any name containing `"` to fail loud
+    # if the input source is ever broadened.
+    for p in packages:
+        if '"' in p or "\\" in p:
+            raise CollectorError(f"package name contains forbidden character: {p!r}")
+    project_in = ", ".join(f'"{p}"' for p in packages)
+    where_clause = f"file.project IN ({project_in})"
+
     argv = [
         _resolve_pypinfo_path(),
         "--json",
         "--days",
         str(window_days),
         "--all",
-        package,
+        "--where",
+        where_clause,
+        # pypinfo's CLI requires a positional [PROJECT] argument before
+        # [FIELDS]... — but with --where set, that positional's
+        # generated `file.project = "..."` clause is overridden. Pass
+        # the first package as a placeholder; --where supersedes.
+        packages[0],
+        # Pivot by project (so we can split the result per-package),
+        # then ci + installer for the existing filters.
+        "project",
         "ci",
         "installer",
     ]
@@ -147,50 +182,60 @@ def run_pypinfo(
         try:
             result = runner(argv, env)
         except subprocess.TimeoutExpired as e:
-            raise CollectorError(f"pypinfo timed out for {package!r} after {e.timeout}s") from e
+            raise CollectorError(
+                f"pypinfo timed out for batch of {len(packages)} packages after {e.timeout}s"
+            ) from e
 
     if result.returncode != 0:
         raise CollectorError(
-            f"pypinfo exited {result.returncode} for {package!r}: {result.stderr.strip()}"
+            f"pypinfo exited {result.returncode} for batch of {len(packages)} "
+            f"packages: {result.stderr.strip()}"
         )
     try:
         payload: Any = json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise CollectorError(f"pypinfo produced malformed JSON for {package!r}: {e}") from e
+        raise CollectorError(f"pypinfo produced malformed JSON: {e}") from e
 
     rows = payload.get("rows") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
-        raise CollectorError(f"pypinfo output missing 'rows' list for {package!r}")
+        raise CollectorError("pypinfo output missing 'rows' list")
 
-    total = 0
+    counts: dict[str, int] = {p: 0 for p in packages}
+    requested = set(packages)
     for row in rows:
         if not isinstance(row, dict):
-            raise CollectorError(
-                f"pypinfo row for {package!r} has unexpected shape (not a dict): {row!r}"
-            )
-        # pypinfo emits ci as the *string* "True" / "False" / "None" — BigQuery
-        # cell values are passed through str() in pypinfo's parse_query_result.
-        # If a future pypinfo version emits a native bool/None instead, this
-        # comparison would silently flip and start counting CI traffic as
-        # non-CI; the non-dict-row guard above catches schema breaks loudly.
+            raise CollectorError(f"pypinfo row has unexpected shape (not a dict): {row!r}")
+        # `project` is required when we pivot by it; missing the column
+        # means pypinfo's schema changed under us. Fail loud.
+        if "project" not in row:
+            raise CollectorError(f"pypinfo row missing 'project' field: {row!r}")
+        # Same pattern for installer_name — see the single-package version's
+        # comment in earlier collector iterations.
+        if "installer_name" not in row:
+            raise CollectorError(f"pypinfo row missing 'installer_name' field: {row!r}")
+        # pypinfo emits ci as the string "True" / "False" / "None" —
+        # BigQuery cell values are passed through str() in
+        # parse_query_result. A future pypinfo emitting native bool/None
+        # would silently flip this comparison and start counting CI
+        # traffic as non-CI; the missing-field guards above catch schema
+        # breaks loudly so silent flipping is bounded.
         if row.get("ci") == "True":
             continue
-        # installer_name is required when we pivot by `installer`; missing
-        # the column means pypinfo's schema changed under us and we should
-        # fail loudly rather than silently undercount.
-        if "installer_name" not in row:
-            raise CollectorError(
-                f"pypinfo row for {package!r} missing 'installer_name' field: {row!r}"
-            )
         if row["installer_name"] not in _INSTALLER_ALLOWLIST:
             continue
+        project = row["project"]
+        if project not in requested:
+            # pypinfo returned a row for a package we didn't request —
+            # WHERE clause leak, schema break, or bug somewhere. Fail
+            # loud rather than silently summing into the wrong bucket.
+            raise CollectorError(f"pypinfo returned row for unrequested package: {project!r}")
         count = row.get("download_count", 0)
         if not isinstance(count, int):
             raise CollectorError(
-                f"pypinfo row for {package!r} has non-integer download_count: {count!r}"
+                f"pypinfo row for {project!r} has non-integer download_count: {count!r}"
             )
-        total += count
-    return total
+        counts[project] += count
+    return counts
 
 
 def collect(
@@ -200,50 +245,89 @@ def collect(
     runner: Runner = _default_runner,
 ) -> CollectorResult:
     started = clock()
-    outcomes: list[PackageOutcome] = []
 
+    # Group packages by window_days. Each group becomes one batched
+    # pypinfo invocation — same BigQuery scan cost as a single-package
+    # query (partition + columns are constant; WHERE-IN list size is
+    # not billed). With everyone on the default 30-day window, this is
+    # a single query regardless of how many packages are configured.
+    by_window: dict[int, list[PackageConfig]] = {}
     for pkg in config.packages:
-        outcome = _collect_one(pkg, config, runner)
-        outcomes.append(outcome)
+        by_window.setdefault(pkg.window_days, []).append(pkg)
+
+    # Per-window batch results. A batch failure (BigQuery error,
+    # malformed JSON, schema break) marks every package in that window
+    # as failed; per-package failures (currently only the badge write)
+    # are isolated below.
+    counts_by_pkg: dict[str, int] = {}
+    batch_errors: dict[int, str] = {}
+
+    for window, pkgs in by_window.items():
+        try:
+            batch = run_pypinfo_batch(
+                [p.name for p in pkgs],
+                window,
+                credential_file=config.service.credential_file,
+                runner=runner,
+            )
+        except CollectorError as e:
+            logger.error("collector: batch query for window=%dd failed: %s", window, e)
+            batch_errors[window] = str(e)
+            continue
+        counts_by_pkg.update(batch)
+
+    outcomes: list[PackageOutcome] = []
+    for pkg in config.packages:
+        if pkg.window_days in batch_errors:
+            outcomes.append(
+                PackageOutcome(
+                    package=pkg.name,
+                    window_days=pkg.window_days,
+                    count=None,
+                    error=batch_errors[pkg.window_days],
+                )
+            )
+            continue
+
+        count = counts_by_pkg.get(pkg.name, 0)
+        try:
+            badge_path = (
+                config.service.output_dir
+                / pkg.name
+                / _BADGE_FILENAME_TEMPLATE.format(days=pkg.window_days)
+            )
+            payload = badge.build_payload(
+                count=count,
+                label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days),
+            )
+            badge.write_badge(path=badge_path, payload=payload)
+        except OSError as e:
+            # Per-package badge-write isolation: a read-only output dir,
+            # disk-full, or perms problem for one package must not
+            # abort the rest of the run, and must not skip the
+            # _health.json write below.
+            logger.error("collector: badge write failed for %s: %s", pkg.name, e)
+            outcomes.append(
+                PackageOutcome(
+                    package=pkg.name,
+                    window_days=pkg.window_days,
+                    count=None,
+                    error=f"badge write failed: {e}",
+                )
+            )
+            continue
+
+        logger.info(
+            "collector: wrote badge for %s (count=%d, path=%s)",
+            pkg.name,
+            count,
+            badge_path,
+        )
+        outcomes.append(PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count))
 
     finished = clock()
     _write_health(config.service.output_dir, started, finished, outcomes)
     return CollectorResult(started=started, finished=finished, outcomes=tuple(outcomes))
-
-
-def _collect_one(
-    pkg: PackageConfig,
-    config: Config,
-    runner: Runner,
-) -> PackageOutcome:
-    try:
-        count = run_pypinfo(
-            pkg.name,
-            pkg.window_days,
-            credential_file=config.service.credential_file,
-            runner=runner,
-        )
-        badge_path = (
-            config.service.output_dir
-            / pkg.name
-            / _BADGE_FILENAME_TEMPLATE.format(days=pkg.window_days)
-        )
-        payload = badge.build_payload(
-            count=count, label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days)
-        )
-        badge.write_badge(path=badge_path, payload=payload)
-    except (CollectorError, OSError) as e:
-        # Per-package isolation: a single package's BigQuery failure or disk
-        # write failure must not abort the whole run, and must not skip the
-        # _health.json write. Operators rely on _health.json as the single
-        # diagnostic surface for the v1 staleness mechanism.
-        logger.error("collector: %s", e)
-        return PackageOutcome(
-            package=pkg.name, window_days=pkg.window_days, count=None, error=str(e)
-        )
-
-    logger.info("collector: wrote badge for %s (count=%d, path=%s)", pkg.name, count, badge_path)
-    return PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count)
 
 
 def _write_health(

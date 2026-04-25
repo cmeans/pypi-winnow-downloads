@@ -12,7 +12,7 @@ from pypi_winnow_downloads.collector import (
     CollectorError,
     _resolve_pypinfo_path,
     collect,
-    run_pypinfo,
+    run_pypinfo_batch,
 )
 from pypi_winnow_downloads.config import Config, PackageConfig, ServiceConfig
 
@@ -21,10 +21,31 @@ def _ok_result(argv: list[str], stdout: str = '{"rows": []}') -> subprocess.Comp
     return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
 
-# --- run_pypinfo argv + env contract ---
+# --- _resolve_pypinfo_path ----------------------------------------------
 
 
-def test_run_pypinfo_invokes_pypinfo_with_expected_argv(tmp_path: Path) -> None:
+def test_resolve_pypinfo_path_neighbors_sys_executable() -> None:
+    """Resolver returns the pypinfo console script in the same directory
+    as the running Python interpreter — the layout pip + uv +
+    setuptools-based installers all produce when pypi-winnow-downloads
+    pulls in pypinfo as a runtime dep.
+    """
+    resolved = Path(_resolve_pypinfo_path())
+    assert resolved.is_absolute()
+    assert resolved.parent == Path(sys.executable).parent
+    assert resolved.name in ("pypinfo", "pypinfo.exe")
+
+
+# --- run_pypinfo_batch argv + env contract ------------------------------
+
+
+def test_run_pypinfo_batch_uses_where_in_clause_for_all_packages(tmp_path: Path) -> None:
+    """One pypinfo invocation scans BigQuery for every package via a
+    `WHERE file.project IN (...)` clause. This is the cost-per-N-packages
+    invariant — without it the collector's BigQuery scan would scale
+    linearly with the package count and quickly leave the 1 TB/month
+    free tier.
+    """
     captured: list[list[str]] = []
 
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -34,50 +55,36 @@ def test_run_pypinfo_invokes_pypinfo_with_expected_argv(tmp_path: Path) -> None:
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    run_pypinfo_batch(
+        ["mcp-clipboard", "mcp-synology", "yt-dont-recommend"],
+        30,
+        credential_file=creds,
+        runner=fake_runner,
+    )
 
-    assert len(captured) == 1
+    assert len(captured) == 1, "batch must produce exactly one runner invocation"
     argv = captured[0]
-    # argv[0] is an absolute path to the pypinfo console script in the same
-    # venv as this Python interpreter, NOT the bare string "pypinfo". An
-    # absolute path skips PATH lookup entirely, which removes a class of
-    # install-layout-dependent failures (e.g., systemd's stripped PATH not
-    # including the venv bin) without per-deployment workarounds.
-    argv0 = Path(argv[0])
-    assert argv0.is_absolute(), f"argv[0] must be an absolute path, got {argv[0]!r}"
-    assert argv0.name in ("pypinfo", "pypinfo.exe")
+    # argv[0] is the resolver's absolute path, basename pypinfo.
+    assert Path(argv[0]).is_absolute()
+    assert Path(argv[0]).name in ("pypinfo", "pypinfo.exe")
     assert "--json" in argv
     assert argv[argv.index("--days") + 1] == "30"
     assert "--all" in argv
-    assert "mypkg" in argv
-    # Pivot fields come after the package per pypinfo's positional convention.
-    # We pivot by both `ci` AND `installer` so we can filter out non-installer
-    # traffic (mirrors, browsers, scrapers) downstream.
-    assert argv.index("mypkg") < argv.index("ci") < argv.index("installer")
-    # `-a` must NOT be in argv. With `-a` present, pypinfo short-circuits at
-    # cli.py:130-133: it sets the credential location and returns without
-    # running the query, regardless of positional args. The credential must
-    # be passed via the GOOGLE_APPLICATION_CREDENTIALS env var instead.
+    # --where contains every requested package wrapped in double quotes
+    # and joined by ", ", and uses file.project IN (...) syntax.
+    where_value = argv[argv.index("--where") + 1]
+    assert where_value.startswith("file.project IN (")
+    assert '"mcp-clipboard"' in where_value
+    assert '"mcp-synology"' in where_value
+    assert '"yt-dont-recommend"' in where_value
+    # Pivot order after the package positional placeholder.
+    assert argv.index("project") < argv.index("ci") < argv.index("installer")
+    # `-a/--auth` MUST NOT be in argv (would short-circuit pypinfo).
     assert "-a" not in argv
     assert "--auth" not in argv
 
 
-def test_resolve_pypinfo_path_neighbors_sys_executable() -> None:
-    """The resolver returns the pypinfo console script that lives in the
-    same directory as the running Python interpreter — i.e., the same
-    venv (or system bin dir) the package itself was installed into. This
-    is the layout pip + uv + setuptools-based installers all produce
-    when pypi-winnow-downloads pulls in pypinfo as a runtime dep, so the
-    resolved path always points at a real binary regardless of how the
-    user installed the package.
-    """
-    resolved = Path(_resolve_pypinfo_path())
-    assert resolved.is_absolute(), "resolver must return an absolute path"
-    assert resolved.parent == Path(sys.executable).parent
-    assert resolved.name in ("pypinfo", "pypinfo.exe")
-
-
-def test_run_pypinfo_passes_credential_via_env_var(tmp_path: Path) -> None:
+def test_run_pypinfo_batch_passes_credential_via_env_var(tmp_path: Path) -> None:
     captured_envs: list[dict[str, str]] = []
 
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -87,29 +94,22 @@ def test_run_pypinfo_passes_credential_via_env_var(tmp_path: Path) -> None:
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    run_pypinfo_batch(["pkg-a"], 30, credential_file=creds, runner=fake_runner)
 
     assert len(captured_envs) == 1
     env = captured_envs[0]
-    # pypinfo (core.py:56) reads GOOGLE_APPLICATION_CREDENTIALS from the
-    # environment when -a is not on argv.
     assert env["GOOGLE_APPLICATION_CREDENTIALS"] == str(creds)
-    # Parent env should still be inherited (PATH must reach the child so
-    # the pypinfo binary itself is resolvable).
     assert "PATH" in env
 
 
-def test_run_pypinfo_real_subprocess_passes_env_to_child(
+def test_run_pypinfo_batch_real_subprocess_passes_env_to_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Integration test: exercises the real subprocess.run path through
-    _default_runner. Catches the class of bug found in PR #5 round 1, where
-    every test injected a fake runner and the real subprocess invocation
-    was never validated.
-
-    Approach: drop a fake `pypinfo` shim on PATH that records what env var
-    + argv it received and emits a known JSON. Verify the collector's real
-    subprocess pipe carried our credential env through.
+    """Integration test: exercises the real `subprocess.run` path through
+    `_default_runner`. The `_resolve_pypinfo_path` helper is monkeypatched
+    to a tmp_path-resident fake binary; the collector invokes that fake
+    via subprocess and the test asserts the credential env reached the
+    child and `-a/--auth` did NOT leak into argv.
     """
     obs_file = tmp_path / "observed.txt"
     fake = tmp_path / "fake-pypinfo"
@@ -122,50 +122,42 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
                 f.write(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "<MISSING>"))
                 f.write("\\n")
                 f.write(",".join(sys.argv[1:]))
-            row = {{"ci": "False", "download_count": 11, "installer_name": "pip"}}
+            row = {{
+                "project": "realpkg",
+                "ci": "False",
+                "download_count": 11,
+                "installer_name": "pip",
+            }}
             print(json.dumps({{"rows": [row], "query": {{}}}}))
             """
         )
     )
     fake.chmod(0o755)
-    # Inject the fake's absolute path as the resolver's return value;
-    # _default_runner will call it directly via subprocess (no PATH lookup).
     monkeypatch.setattr(collector_module, "_resolve_pypinfo_path", lambda: str(fake))
 
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("realpkg", 30, credential_file=creds)
+    counts = run_pypinfo_batch(["realpkg"], 30, credential_file=creds)
 
-    assert count == 11, "default runner did not actually execute the subprocess"
+    assert counts == {"realpkg": 11}
     observed_env, observed_argv = obs_file.read_text().splitlines()
-    assert observed_env == str(creds), "GOOGLE_APPLICATION_CREDENTIALS did not reach child"
+    assert observed_env == str(creds)
     argv_parts = observed_argv.split(",")
-    assert "-a" not in argv_parts and "--auth" not in argv_parts, (
-        "auth flag leaked into argv — pypinfo would short-circuit"
-    )
-    assert "realpkg" in argv_parts
-    assert "ci" in argv_parts
-    assert "installer" in argv_parts
+    assert "-a" not in argv_parts and "--auth" not in argv_parts
+    assert "--where" in argv_parts
+    assert "project" in argv_parts
 
 
-def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
+def test_run_pypinfo_batch_isolates_state_so_env_var_wins_over_persisted_creds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Real pypinfo's `get_credentials()` reads a persisted credential path
-    from `platformdirs.user_data_dir('pypinfo')/db.json`, and only falls
-    back to `GOOGLE_APPLICATION_CREDENTIALS` when that DB is empty
-    (`cli.py:171` -> `db.py:23-26` -> `core.py:56`). On any workstation
-    where `pypinfo -a <path>` has been run, the env var is silently ignored.
-
-    This test mimics that priority order in the fake shim and pre-populates
-    the persisted DB at the *test process's* `XDG_DATA_HOME`. Without
-    `run_pypinfo` overriding `XDG_DATA_HOME` for the subprocess, the
-    polluted path wins and the test fails. With the override in place,
-    `XDG_DATA_HOME` points at a fresh empty dir for the subprocess, the
-    fake's TinyDB read returns nothing, and the env var fallback supplies
-    the expected credential — proving the actual priority bug is
-    neutralized, not just that env reaches the child.
+    """pypinfo's `get_credentials()` reads a persisted credential path
+    from `platformdirs.user_data_dir('pypinfo')/db.json` and returns it
+    via `creds_file or os.environ.get(...)` — left-to-right `or` means
+    a persisted path wins over GOOGLE_APPLICATION_CREDENTIALS. The
+    collector overrides `XDG_DATA_HOME` per invocation so pypinfo's
+    TinyDB query returns None and the env-var fallback applies.
     """
     polluted_xdg = tmp_path / "polluted-xdg"
     (polluted_xdg / "pypinfo").mkdir(parents=True)
@@ -180,8 +172,6 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
         textwrap.dedent(
             f"""\
             #!/usr/bin/env python3
-            # Mimic real pypinfo's get_credentials() priority order:
-            # TinyDB first, GOOGLE_APPLICATION_CREDENTIALS as fallback.
             import json, os
             xdg = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
             db_path = os.path.join(xdg, "pypinfo", "db.json")
@@ -199,10 +189,8 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
             creds = persisted or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
             with open({str(obs_creds)!r}, "w") as f:
                 f.write(creds or "<NONE>")
-            print(json.dumps({{
-                "rows": [{{"ci": "False", "download_count": 1, "installer_name": "pip"}}],
-                "query": {{}},
-            }}))
+            row = {{"project": "pkg", "ci": "False", "download_count": 1, "installer_name": "pip"}}
+            print(json.dumps({{"rows": [row], "query": {{}}}}))
             """
         )
     )
@@ -212,22 +200,42 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
     expected_creds = tmp_path / "expected-creds.json"
     expected_creds.write_text("{}")
 
-    count = run_pypinfo("pkg", 30, credential_file=expected_creds)
+    counts = run_pypinfo_batch(["pkg"], 30, credential_file=expected_creds)
 
-    assert count == 1
+    assert counts == {"pkg": 1}
     assert obs_creds.read_text() == str(expected_creds), (
-        "pypinfo's persisted db.json took priority over GOOGLE_APPLICATION_CREDENTIALS — "
-        "XDG_DATA_HOME isolation in run_pypinfo is missing or broken"
+        "pypinfo's persisted db.json took priority over GOOGLE_APPLICATION_CREDENTIALS "
+        "— XDG_DATA_HOME isolation in run_pypinfo_batch is missing or broken"
     )
 
 
-def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> None:
+# --- run_pypinfo_batch parsing -----------------------------------------
+
+
+def test_run_pypinfo_batch_splits_counts_per_package(tmp_path: Path) -> None:
+    """Multi-package response is split correctly: each row is summed
+    into its own package's bucket based on `project`. CI rows are
+    excluded; non-allowlisted installers are excluded.
+    """
     stdout = json.dumps(
         {
             "rows": [
-                {"ci": "True", "download_count": 900, "installer_name": "pip"},
-                {"ci": "False", "download_count": 70, "installer_name": "pip"},
-                {"ci": "None", "download_count": 25, "installer_name": "pip"},
+                {"project": "pkg-a", "ci": "False", "download_count": 50, "installer_name": "pip"},
+                {"project": "pkg-a", "ci": "False", "download_count": 10, "installer_name": "uv"},
+                {"project": "pkg-a", "ci": "True", "download_count": 9999, "installer_name": "pip"},
+                {"project": "pkg-b", "ci": "False", "download_count": 7, "installer_name": "pip"},
+                {
+                    "project": "pkg-b",
+                    "ci": "False",
+                    "download_count": 600,
+                    "installer_name": "bandersnatch",
+                },
+                {
+                    "project": "pkg-c",
+                    "ci": "False",
+                    "download_count": 1,
+                    "installer_name": "poetry",
+                },
             ],
             "query": {},
         }
@@ -239,150 +247,53 @@ def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> No
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
-
-    assert count == 95
-
-
-def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> None:
-    """The hero metric is 'real-developer downloads' — count only rows from
-    interactive packaging tools (pip, uv, poetry, pdm, pipenv, pipx). Mirror
-    traffic (bandersnatch, Nexus, devpi), browser fetches, scraper UAs
-    (requests, curl), and unknown installers ("None") are excluded.
-
-    Without this filter, mirrors alone can dominate small-package counts —
-    e.g., yt-dont-recommend's 30-day total at v1 was 2,771 with `--all`,
-    of which 1,325 (48%) was bandersnatch alone. The filter brings the
-    number to 14, which is the honest signal.
-    """
-    stdout = json.dumps(
-        {
-            "rows": [
-                # Allowlisted — counted
-                {"ci": "False", "download_count": 50, "installer_name": "pip"},
-                {"ci": "False", "download_count": 30, "installer_name": "uv"},
-                # Excluded — mirrors
-                {"ci": "False", "download_count": 1325, "installer_name": "bandersnatch"},
-                {"ci": "False", "download_count": 88, "installer_name": "Nexus"},
-                # Excluded — non-installer UAs / unknown
-                {"ci": "False", "download_count": 600, "installer_name": "Browser"},
-                {"ci": "False", "download_count": 266, "installer_name": "requests"},
-                {"ci": "False", "download_count": 1382, "installer_name": "None"},
-                # Excluded — even pip is dropped when ci=True
-                {"ci": "True", "download_count": 9999, "installer_name": "pip"},
-            ],
-            "query": {},
-        }
+    counts = run_pypinfo_batch(
+        ["pkg-a", "pkg-b", "pkg-c"], 30, credential_file=creds, runner=fake_runner
     )
 
-    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        return _ok_result(argv, stdout=stdout)
-
-    creds = tmp_path / "creds.json"
-    creds.write_text("{}")
-
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
-
-    assert count == 80, "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
+    assert counts == {
+        "pkg-a": 60,  # 50 (pip) + 10 (uv); 9999 (CI) excluded
+        "pkg-b": 7,  # 7 (pip); 600 (bandersnatch) excluded by allowlist
+        "pkg-c": 1,  # 1 (poetry)
+    }
 
 
-def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> None:
-    """All six interactive Python packaging tools count. If pypinfo ever
-    starts emitting a new mainstream installer (e.g. `rye` resurrected,
-    or some future tool), it'll need to be added to the allowlist
-    explicitly — the filter is fail-closed.
+def test_run_pypinfo_batch_includes_zero_count_packages(tmp_path: Path) -> None:
+    """Packages with zero rows in the response still appear in the
+    returned dict with count=0 — the caller relies on the dict to
+    enumerate which packages were queried.
     """
-    stdout = json.dumps(
-        {
-            "rows": [
-                {"ci": "False", "download_count": 1, "installer_name": "pip"},
-                {"ci": "False", "download_count": 2, "installer_name": "uv"},
-                {"ci": "False", "download_count": 4, "installer_name": "poetry"},
-                {"ci": "False", "download_count": 8, "installer_name": "pdm"},
-                {"ci": "False", "download_count": 16, "installer_name": "pipenv"},
-                {"ci": "False", "download_count": 32, "installer_name": "pipx"},
-            ],
-            "query": {},
-        }
-    )
 
-    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        return _ok_result(argv, stdout=stdout)
-
-    creds = tmp_path / "creds.json"
-    creds.write_text("{}")
-
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
-
-    assert count == 63  # 1+2+4+8+16+32
-
-
-def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
-    """pypinfo emits installer_name as the lowercase string the BigQuery
-    schema records (`pip`, `uv`, `poetry`, ...). A capitalized variant
-    like `Pip` is not what real installer telemetry produces; if it
-    appears, it's a different category (some other UA reusing the name)
-    and should be excluded.
-    """
-    stdout = json.dumps(
-        {
-            "rows": [
-                {"ci": "False", "download_count": 100, "installer_name": "pip"},
-                {"ci": "False", "download_count": 999, "installer_name": "Pip"},
-                {"ci": "False", "download_count": 999, "installer_name": "PIP"},
-            ],
-            "query": {},
-        }
-    )
-
-    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        return _ok_result(argv, stdout=stdout)
-
-    creds = tmp_path / "creds.json"
-    creds.write_text("{}")
-
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
-
-    assert count == 100, "case-mismatched variants must be excluded"
-
-
-def test_run_pypinfo_raises_on_missing_installer_name_field(tmp_path: Path) -> None:
-    """pypinfo always emits installer_name when we pass `installer` as a
-    pivot field. Its absence means pypinfo's column-naming convention
-    changed under us. Fail loud so we notice the schema drift instead of
-    silently undercounting (or worse, double-counting if some rows have
-    it and others don't).
-    """
-    stdout = json.dumps(
-        {
-            "rows": [{"ci": "False", "download_count": 50}],  # missing installer_name
-            "query": {},
-        }
-    )
-
-    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        return _ok_result(argv, stdout=stdout)
-
-    creds = tmp_path / "creds.json"
-    creds.write_text("{}")
-
-    with pytest.raises(CollectorError, match="installer_name"):
-        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
-
-
-def test_run_pypinfo_returns_zero_when_rows_empty(tmp_path: Path) -> None:
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return _ok_result(argv, stdout='{"rows": [], "query": {}}')
 
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("newpkg", 30, credential_file=creds, runner=fake_runner)
+    counts = run_pypinfo_batch(["pkg-a", "pkg-b"], 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 0
+    assert counts == {"pkg-a": 0, "pkg-b": 0}
 
 
-def test_run_pypinfo_raises_on_nonzero_exit(tmp_path: Path) -> None:
+def test_run_pypinfo_batch_returns_empty_for_empty_input(tmp_path: Path) -> None:
+    """Calling the batch with no packages is a no-op (skips the
+    subprocess) — defensive against config-loading edge cases."""
+    invocations: list[None] = []
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        invocations.append(None)
+        return _ok_result(argv)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    counts = run_pypinfo_batch([], 30, credential_file=creds, runner=fake_runner)
+
+    assert counts == {}
+    assert invocations == [], "no runner call expected for empty input"
+
+
+def test_run_pypinfo_batch_raises_on_nonzero_exit(tmp_path: Path) -> None:
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, 2, stdout="", stderr="auth failed")
 
@@ -390,10 +301,10 @@ def test_run_pypinfo_raises_on_nonzero_exit(tmp_path: Path) -> None:
     creds.write_text("{}")
 
     with pytest.raises(CollectorError, match="auth failed"):
-        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
 
 
-def test_run_pypinfo_raises_on_malformed_json(tmp_path: Path) -> None:
+def test_run_pypinfo_batch_raises_on_malformed_json(tmp_path: Path) -> None:
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return _ok_result(argv, stdout="not json at all")
 
@@ -401,10 +312,10 @@ def test_run_pypinfo_raises_on_malformed_json(tmp_path: Path) -> None:
     creds.write_text("{}")
 
     with pytest.raises(CollectorError, match="malformed JSON"):
-        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
 
 
-def test_run_pypinfo_raises_when_rows_key_missing(tmp_path: Path) -> None:
+def test_run_pypinfo_batch_raises_when_rows_key_missing(tmp_path: Path) -> None:
     def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return _ok_result(argv, stdout='{"query": {}}')
 
@@ -412,17 +323,14 @@ def test_run_pypinfo_raises_when_rows_key_missing(tmp_path: Path) -> None:
     creds.write_text("{}")
 
     with pytest.raises(CollectorError, match="rows"):
-        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
 
 
-def test_run_pypinfo_raises_on_non_dict_row(tmp_path: Path) -> None:
-    # Silently skipping non-dict rows masks upstream pypinfo schema changes.
-    # Fail loudly so a future format break is caught at the collector boundary
-    # rather than producing wrong (but plausible) counts.
+def test_run_pypinfo_batch_raises_on_non_dict_row(tmp_path: Path) -> None:
     stdout = json.dumps(
         {
             "rows": [
-                {"ci": "False", "download_count": 7, "installer_name": "pip"},
+                {"project": "pkg", "ci": "False", "download_count": 7, "installer_name": "pip"},
                 "unexpected-string-row",
             ],
             "query": {},
@@ -436,10 +344,10 @@ def test_run_pypinfo_raises_on_non_dict_row(tmp_path: Path) -> None:
     creds.write_text("{}")
 
     with pytest.raises(CollectorError, match="unexpected"):
-        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
 
 
-def test_run_pypinfo_raises_on_subprocess_timeout(tmp_path: Path) -> None:
+def test_run_pypinfo_batch_raises_on_subprocess_timeout(tmp_path: Path) -> None:
     def slow_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd=list(argv), timeout=180)
 
@@ -447,10 +355,144 @@ def test_run_pypinfo_raises_on_subprocess_timeout(tmp_path: Path) -> None:
     creds.write_text("{}")
 
     with pytest.raises(CollectorError, match="timed out"):
-        run_pypinfo("mypkg", 30, credential_file=creds, runner=slow_runner)
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=slow_runner)
 
 
-# --- collect() orchestration ---
+def test_run_pypinfo_batch_raises_on_missing_project_field(tmp_path: Path) -> None:
+    """Without `project`, we can't split per-package. Schema break →
+    fail loud instead of silent attribution to the wrong package."""
+    stdout = json.dumps(
+        {
+            "rows": [{"ci": "False", "download_count": 7, "installer_name": "pip"}],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    with pytest.raises(CollectorError, match="project"):
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
+
+
+def test_run_pypinfo_batch_raises_on_missing_installer_name_field(tmp_path: Path) -> None:
+    stdout = json.dumps(
+        {
+            "rows": [{"project": "pkg", "ci": "False", "download_count": 50}],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    with pytest.raises(CollectorError, match="installer_name"):
+        run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
+
+
+def test_run_pypinfo_batch_raises_on_unrequested_package(tmp_path: Path) -> None:
+    """If pypinfo returns a row for a package we didn't ask about,
+    something has gone wrong with the WHERE clause or pypinfo. Better
+    to fail loud than silently misattribute or undercount."""
+    stdout = json.dumps(
+        {
+            "rows": [
+                {
+                    "project": "asked-pkg",
+                    "ci": "False",
+                    "download_count": 10,
+                    "installer_name": "pip",
+                },
+                {
+                    "project": "WRONG-pkg",
+                    "ci": "False",
+                    "download_count": 999,
+                    "installer_name": "pip",
+                },
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    with pytest.raises(CollectorError, match="WRONG-pkg"):
+        run_pypinfo_batch(["asked-pkg"], 30, credential_file=creds, runner=fake_runner)
+
+
+def test_run_pypinfo_batch_rejects_package_names_with_quote_characters(
+    tmp_path: Path,
+) -> None:
+    """PyPI package names are PEP 508-restricted to [A-Za-z0-9._-]; a
+    name with `"` or `\\` indicates either an invalid input source or
+    deliberate injection attempt. Reject before SQL composition."""
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    with pytest.raises(CollectorError, match="forbidden character"):
+        run_pypinfo_batch(['ev"il'], 30, credential_file=creds, runner=lambda *_: _ok_result([]))
+
+
+def test_run_pypinfo_batch_allowlist_is_case_sensitive(tmp_path: Path) -> None:
+    stdout = json.dumps(
+        {
+            "rows": [
+                {"project": "pkg", "ci": "False", "download_count": 100, "installer_name": "pip"},
+                {"project": "pkg", "ci": "False", "download_count": 999, "installer_name": "Pip"},
+                {"project": "pkg", "ci": "False", "download_count": 999, "installer_name": "PIP"},
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    counts = run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
+
+    assert counts == {"pkg": 100}
+
+
+def test_run_pypinfo_batch_allowlist_covers_packaging_tool_family(tmp_path: Path) -> None:
+    stdout = json.dumps(
+        {
+            "rows": [
+                {"project": "pkg", "ci": "False", "download_count": 1, "installer_name": "pip"},
+                {"project": "pkg", "ci": "False", "download_count": 2, "installer_name": "uv"},
+                {"project": "pkg", "ci": "False", "download_count": 4, "installer_name": "poetry"},
+                {"project": "pkg", "ci": "False", "download_count": 8, "installer_name": "pdm"},
+                {"project": "pkg", "ci": "False", "download_count": 16, "installer_name": "pipenv"},
+                {"project": "pkg", "ci": "False", "download_count": 32, "installer_name": "pipx"},
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    counts = run_pypinfo_batch(["pkg"], 30, credential_file=creds, runner=fake_runner)
+
+    assert counts == {"pkg": 63}  # 1+2+4+8+16+32
+
+
+# --- collect() orchestration -------------------------------------------
 
 
 def _make_config(tmp_path: Path, packages: list[PackageConfig]) -> Config:
@@ -465,19 +507,24 @@ def _make_config(tmp_path: Path, packages: list[PackageConfig]) -> Config:
 
 
 def _fake_runner_for(counts_by_package: dict[str, int]):
+    """Return a runner that, given a batched argv with --where IN (...),
+    emits one row per package with installer_name=pip and the
+    pre-configured count."""
+
     def runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        ci_idx = argv.index("ci")
-        pkg = argv[ci_idx - 1]
-        non_ci_count = counts_by_package.get(pkg, 0)
-        stdout = json.dumps(
+        where_value = argv[argv.index("--where") + 1]
+        # Extract package names from the WHERE clause.
+        pkgs_in_where = [p for p in counts_by_package if f'"{p}"' in where_value]
+        rows = [
             {
-                "rows": [
-                    {"ci": "True", "download_count": 10_000, "installer_name": "pip"},
-                    {"ci": "False", "download_count": non_ci_count, "installer_name": "pip"},
-                ],
-                "query": {},
+                "project": p,
+                "ci": "False",
+                "download_count": counts_by_package[p],
+                "installer_name": "pip",
             }
-        )
+            for p in pkgs_in_where
+        ]
+        stdout = json.dumps({"rows": rows, "query": {}})
         return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
     return runner
@@ -514,6 +561,81 @@ def test_collect_writes_badge_file_per_package_with_window_in_filename(tmp_path:
     assert yt_payload["color"] == "lightgrey"
 
 
+def test_collect_groups_packages_by_window_into_one_batch_per_window(
+    tmp_path: Path,
+) -> None:
+    """Packages with the same window_days share a single pypinfo
+    invocation; packages with different window_days each get their own
+    batch. The cost-per-N invariant only applies within a window
+    group — but in practice every package uses 30 days, so this is
+    one query in the typical case.
+    """
+    config = _make_config(
+        tmp_path,
+        [
+            PackageConfig(name="a", window_days=30),
+            PackageConfig(name="b", window_days=30),
+            PackageConfig(name="c", window_days=7),
+        ],
+    )
+
+    runner_calls: list[tuple[list[str], int]] = []
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        days = int(argv[argv.index("--days") + 1])
+        where = argv[argv.index("--where") + 1]
+        runner_calls.append((argv, days))
+        rows = [
+            {"project": p, "ci": "False", "download_count": 1, "installer_name": "pip"}
+            for p in ("a", "b", "c")
+            if f'"{p}"' in where
+        ]
+        return _ok_result(argv, stdout=json.dumps({"rows": rows, "query": {}}))
+
+    collect(config, runner=fake_runner)
+
+    assert len(runner_calls) == 2, "expected one batch per distinct window_days"
+    by_days = {days: argv for argv, days in runner_calls}
+    assert set(by_days.keys()) == {30, 7}
+    where_30 = by_days[30][by_days[30].index("--where") + 1]
+    where_7 = by_days[7][by_days[7].index("--where") + 1]
+    assert '"a"' in where_30 and '"b"' in where_30 and '"c"' not in where_30
+    assert '"c"' in where_7 and '"a"' not in where_7 and '"b"' not in where_7
+
+
+def test_collect_one_batch_for_all_packages_when_window_is_uniform(tmp_path: Path) -> None:
+    """The common case: every configured package uses the same window
+    (config.example.yaml has all three at 30 days). One pypinfo call,
+    one BigQuery scan — the foundation of the cost story for hosting
+    dozens of packages."""
+    config = _make_config(
+        tmp_path,
+        [PackageConfig(name=f"pkg-{i}", window_days=30) for i in range(10)],
+    )
+
+    invocation_count = 0
+
+    def counting_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        nonlocal invocation_count
+        invocation_count += 1
+        where = argv[argv.index("--where") + 1]
+        rows = [
+            {
+                "project": f"pkg-{i}",
+                "ci": "False",
+                "download_count": i * 10,
+                "installer_name": "pip",
+            }
+            for i in range(10)
+            if f'"pkg-{i}"' in where
+        ]
+        return _ok_result(argv, stdout=json.dumps({"rows": rows, "query": {}}))
+
+    collect(config, runner=counting_runner)
+
+    assert invocation_count == 1, "10 packages with the same window must be one batch"
+
+
 def test_collect_writes_health_file_with_per_package_counts_and_timestamps(
     tmp_path: Path,
 ) -> None:
@@ -535,64 +657,51 @@ def test_collect_writes_health_file_with_per_package_counts_and_timestamps(
     assert health["packages"] == {"mcp-clipboard": {"count": 142, "window_days": 30}}
 
 
-def test_collect_continues_past_single_package_failure(tmp_path: Path) -> None:
+def test_collect_records_batch_failure_for_all_packages_in_window(tmp_path: Path) -> None:
+    """When the BigQuery query fails, all packages in that window's
+    batch are marked failed (we have no per-package counts). The other
+    windows still run normally; _health.json still writes."""
     config = _make_config(
         tmp_path,
         [
-            PackageConfig(name="broken-pkg", window_days=30),
-            PackageConfig(name="good-pkg", window_days=30),
+            PackageConfig(name="failing-pkg-1", window_days=30),
+            PackageConfig(name="failing-pkg-2", window_days=30),
+            PackageConfig(name="ok-pkg", window_days=7),
         ],
     )
 
-    def partly_failing_runner(
-        argv: list[str], env: dict[str, str]
-    ) -> subprocess.CompletedProcess[str]:
-        ci_idx = argv.index("ci")
-        pkg = argv[ci_idx - 1]
-        if pkg == "broken-pkg":
+    def split_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        days = int(argv[argv.index("--days") + 1])
+        if days == 30:
             return subprocess.CompletedProcess(argv, 2, stdout="", stderr="boom")
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout=json.dumps(
-                {
-                    "rows": [{"ci": "False", "download_count": 99, "installer_name": "pip"}],
-                    "query": {},
-                }
-            ),
-            stderr="",
-        )
+        # 7-day window succeeds.
+        rows = [{"project": "ok-pkg", "ci": "False", "download_count": 99, "installer_name": "pip"}]
+        return _ok_result(argv, stdout=json.dumps({"rows": rows, "query": {}}))
 
-    result = collect(config, runner=partly_failing_runner)
+    result = collect(config, runner=split_runner)
 
-    good_badge = config.service.output_dir / "good-pkg" / "downloads-30d-non-ci.json"
-    broken_badge = config.service.output_dir / "broken-pkg" / "downloads-30d-non-ci.json"
-    assert good_badge.exists()
-    assert not broken_badge.exists()
+    failures_by_pkg = {f.package for f in result.failures}
+    assert failures_by_pkg == {"failing-pkg-1", "failing-pkg-2"}
 
-    assert len(result.failures) == 1
-    assert result.failures[0].package == "broken-pkg"
-    assert "boom" in (result.failures[0].error or "")
+    ok_pkg = next(o for o in result.outcomes if o.package == "ok-pkg")
+    assert ok_pkg.count == 99
+    assert (config.service.output_dir / "ok-pkg" / "downloads-7d-non-ci.json").exists()
 
     health = json.loads((config.service.output_dir / "_health.json").read_text())
-    assert "error" in health["packages"]["broken-pkg"]
-    assert health["packages"]["good-pkg"]["count"] == 99
+    assert "error" in health["packages"]["failing-pkg-1"]
+    assert "error" in health["packages"]["failing-pkg-2"]
+    assert health["packages"]["ok-pkg"]["count"] == 99
 
 
 def test_collect_records_badge_write_failure_and_still_writes_health(tmp_path: Path) -> None:
-    """If an IOError fires during badge.write_badge — read-only output dir,
-    disk full, perms — that failure must surface as a recorded outcome and
-    must not prevent _health.json from being written. The health file is
-    the operational diagnostic; losing it on the failure path defeats its
-    purpose.
-    """
-    output_dir = tmp_path / "ro_output"
+    """Per-package badge-write isolation. A read-only output subdir for
+    one package marks that package as failed; the others get their
+    badges; _health.json still writes."""
+    output_dir = tmp_path / "out"
     output_dir.mkdir()
-    # Pre-create the package subdir as a read-only file so the badge write
-    # fails when the collector tries to mkdir its parent. The health file
-    # itself writes at output_dir root, which remains writable.
-    blocker = output_dir / "mcp-clipboard"
-    blocker.write_text("not a directory")  # collision: mkdir(parents=True) hits a file
+    # Pre-create a file at the package subdir path so mkdir(parents=True)
+    # for badge.write_badge fails for this package only.
+    (output_dir / "broken-pkg").write_text("not a directory")
 
     config = Config(
         service=ServiceConfig(
@@ -600,22 +709,24 @@ def test_collect_records_badge_write_failure_and_still_writes_health(tmp_path: P
             credential_file=tmp_path / "creds.json",
             stale_threshold_days=3,
         ),
-        packages=(PackageConfig(name="mcp-clipboard", window_days=30),),
+        packages=(
+            PackageConfig(name="broken-pkg", window_days=30),
+            PackageConfig(name="ok-pkg", window_days=30),
+        ),
     )
-    runner = _fake_runner_for({"mcp-clipboard": 99})
+    runner = _fake_runner_for({"broken-pkg": 50, "ok-pkg": 99})
 
     result = collect(config, runner=runner)
 
-    assert len(result.failures) == 1
-    assert result.failures[0].package == "mcp-clipboard"
-    assert result.failures[0].error is not None
+    failures = {f.package for f in result.failures}
+    assert failures == {"broken-pkg"}
+    assert (output_dir / "ok-pkg" / "downloads-30d-non-ci.json").exists()
 
-    # Health file must still write — operators rely on it for the failure
-    # signal at the operational layer.
     health_path = output_dir / "_health.json"
     assert health_path.exists()
     health = json.loads(health_path.read_text())
-    assert "error" in health["packages"]["mcp-clipboard"]
+    assert "error" in health["packages"]["broken-pkg"]
+    assert health["packages"]["ok-pkg"]["count"] == 99
 
 
 def test_collect_result_reports_no_failures_on_full_success(tmp_path: Path) -> None:

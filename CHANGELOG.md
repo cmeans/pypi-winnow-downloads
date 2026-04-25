@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Collector now batches every package into a single BigQuery query
+  per `window_days` group**, replacing the previous per-package
+  `pypinfo` invocation. The new `run_pypinfo_batch(packages, window_days, ...)`
+  builds a `WHERE file.project IN (...)` clause covering every package
+  with the same window and pivots by `project` + `ci` + `installer`,
+  splitting the response per-package post-parse. BigQuery's
+  `bytes_billed` is bounded by partition + column scan and is NOT
+  affected by the size of the IN-list, so one batched call costs the
+  same as one single-package call (~4-5 GB scan). This is the cost
+  lever for hosting many packages on the 1 TB/month free tier — the
+  previous implementation scaled linearly with package count, capping
+  realistic free-tier hosting at ~7 packages on a daily cadence; the
+  batched implementation scales to hundreds of packages on the same
+  budget. `collect()` groups configured packages by `window_days` and
+  runs one batch per group; the typical case (everyone on 30-day
+  windows) is exactly one query per collector run regardless of N.
+  Per-package failure isolation behaviour is preserved: a batch-level
+  failure (BigQuery error, malformed JSON, schema break) marks every
+  package in that window as failed but the other windows still run;
+  per-package badge-write failures stay isolated to the affected
+  package; `_health.json` writes unconditionally. Package names with
+  `"` or `\\` are rejected pre-SQL-composition as a belt-and-braces
+  defense against future input-source broadening.
+
 ## [0.1.0] - 2026-04-24
 
 ### Changed
