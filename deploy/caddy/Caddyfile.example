@@ -1,0 +1,50 @@
+# Example Caddyfile for serving pypi-winnow-downloads badge JSON over HTTPS.
+#
+# Caddy auto-provisions a Let's Encrypt certificate for the host name
+# below via ACME HTTP-01 the first time it's reached on port 80. Make
+# sure ports 80 and 443 are reachable from the public internet (router
+# port-forward, firewall, etc.) before starting Caddy on this domain
+# or ACME will fail.
+#
+# Install steps (Debian-family, Caddy installed from caddyserver.com):
+#   sudo cp Caddyfile.example /etc/caddy/Caddyfile
+#   # Set the BADGE_HOST env var or replace {$BADGE_HOST:badges.example.com}
+#   # below with your actual public hostname.
+#   sudo systemctl reload caddy
+#
+# Verify after first hit:
+#   curl -sI https://<your-host>/<some-package>/downloads-30d-non-ci.json
+# A 200 with Content-Type: application/json means you're good.
+
+{$BADGE_HOST:badges.example.com} {
+	# Static file serving from the collector's output directory. Caddy
+	# (in production) typically runs as the `caddy` system user — make
+	# sure that user can read /var/lib/pypi-winnow-downloads/output/.
+	root * /var/lib/pypi-winnow-downloads/output
+	file_server {
+		# Don't expose a directory listing — the package list is implied
+		# by config.yaml and not something we want public.
+		index off
+	}
+
+	# Set Content-Type and CORS for the JSON badge files. shields.io
+	# fetches server-side so CORS isn't strictly required for shields.io
+	# itself, but allows direct browser consumption of the JSON.
+	@badge_json {
+		path *.json
+	}
+	header @badge_json Content-Type "application/json"
+	header @badge_json Access-Control-Allow-Origin "*"
+	# shields.io's badge CDN caches endpoint responses for hours regardless
+	# of upstream Cache-Control. This header makes our own cache stance
+	# explicit and is a hint to other consumers; the daily collector run
+	# tolerates it well.
+	header @badge_json Cache-Control "public, max-age=3600"
+
+	encode zstd gzip
+
+	# Log to stdout so journalctl -u caddy captures it.
+	log {
+		output stdout
+	}
+}

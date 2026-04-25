@@ -1,0 +1,62 @@
+# Example systemd service unit for the pypi-winnow-downloads collector.
+#
+# Install steps (adjust paths to suit your host):
+#   sudo cp pypi-winnow-downloads-collector.service /etc/systemd/system/
+#   sudo cp pypi-winnow-downloads-collector.timer   /etc/systemd/system/
+#   sudo useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/pypi-winnow-downloads winnow
+#   sudo install -d -o winnow -g winnow -m 0755 /var/lib/pypi-winnow-downloads/output
+#   sudo install -d -o root   -g winnow -m 0750 /etc/pypi-winnow-downloads
+#   # Place config.yaml and the GCP service-account JSON in /etc/pypi-winnow-downloads/
+#   # (mode 0640, group=winnow). See ../../config.example.yaml for the config shape.
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pypi-winnow-downloads-collector.timer
+#
+# Run once on demand (without waiting for the timer):
+#   sudo systemctl start pypi-winnow-downloads-collector.service
+#
+# Tail logs from the journal:
+#   sudo journalctl -u pypi-winnow-downloads-collector.service -f
+
+[Unit]
+Description=Collect PyPI non-CI download counts via pypinfo
+Documentation=https://github.com/cmeans/pypi-winnow-downloads
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=winnow
+Group=winnow
+
+# pypinfo reads GOOGLE_APPLICATION_CREDENTIALS to locate the GCP service
+# account key. The collector overrides XDG_DATA_HOME per invocation so
+# any prior `pypinfo -a <path>` state on this host is ignored — no need
+# to set it here.
+Environment=GOOGLE_APPLICATION_CREDENTIALS=/etc/pypi-winnow-downloads/gcp.json
+
+ExecStart=/usr/local/bin/winnow-collect --config /etc/pypi-winnow-downloads/config.yaml
+WorkingDirectory=/var/lib/pypi-winnow-downloads
+
+# Hardening. The collector only needs to read /etc/pypi-winnow-downloads/
+# and write /var/lib/pypi-winnow-downloads/. Lock the rest down.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pypi-winnow-downloads
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

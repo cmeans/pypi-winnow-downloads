@@ -1,0 +1,27 @@
+# Daily timer for the pypi-winnow-downloads collector.
+#
+# OnCalendar=daily fires at 00:00 in the host's local timezone.
+# RandomizedDelaySec spreads the actual run window across the next
+# 30 minutes so multiple deployments don't hammer BigQuery at the
+# same instant. Persistent=true causes a missed run (e.g. host was
+# off) to be triggered as soon as the host is back up — useful for
+# laptops/intermittent hosts; harmless on a 24/7 server.
+#
+# To run at a specific local time instead of midnight, change OnCalendar
+# (e.g. `OnCalendar=*-*-* 04:00:00`).
+#
+# `systemctl list-timers` shows the next/last run.
+
+[Unit]
+Description=Daily run of the pypi-winnow-downloads collector
+Documentation=https://github.com/cmeans/pypi-winnow-downloads
+Requires=pypi-winnow-downloads-collector.service
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=pypi-winnow-downloads-collector.service
+
+[Install]
+WantedBy=timers.target

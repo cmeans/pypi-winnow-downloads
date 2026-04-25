@@ -1,0 +1,61 @@
+# Example Docker Compose layout pairing the collector (one-shot) with
+# Caddy (long-running). Place this file alongside `config.yaml` and the
+# GCP service-account JSON, and a `Caddyfile` (copy from
+# ../caddy/Caddyfile.example and set BADGE_HOST in your environment).
+#
+# Run the collector once on demand:
+#   docker compose --profile run-once run --rm collector
+#
+# Schedule daily on the host (host crontab — Compose has no native
+# scheduler):
+#   30 4 * * * cd /path/to/this/dir && docker compose --profile run-once run --rm collector
+#
+# Bring Caddy up:
+#   docker compose up -d caddy
+#
+# `caddy_data` and `caddy_config` are named volumes so Let's Encrypt
+# state survives recreation. Without them every restart triggers a new
+# ACME order — not great for rate limits.
+
+services:
+  collector:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: pypi-winnow-downloads:latest
+    volumes:
+      - ./config.yaml:/etc/pypi-winnow-downloads/config.yaml:ro
+      - ./gcp.json:/etc/pypi-winnow-downloads/gcp.json:ro
+      - badge_output:/var/lib/pypi-winnow-downloads/output
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /etc/pypi-winnow-downloads/gcp.json
+    # `profiles: [run-once]` keeps `docker compose up` from starting the
+    # collector on its own — host scheduling drives it instead.
+    profiles: [run-once]
+
+  # Note: caddy intentionally does NOT depend_on the collector.
+  # `depends_on` without a healthcheck only sequences container start,
+  # not data readiness; your first scheduled `docker compose run` is
+  # what populates the badge_output volume. Until then Caddy will serve
+  # 404s for badge paths, which shields.io renders as an error state —
+  # the correct signal for a not-yet-collected package.
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Set BADGE_HOST in the host shell or .env file. Caddy will provision
+      # a Let's Encrypt cert for whatever name you pass here.
+      BADGE_HOST: ${BADGE_HOST:?BADGE_HOST must be set, e.g. badges.example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - badge_output:/var/lib/pypi-winnow-downloads/output:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  badge_output:
+  caddy_data:
+  caddy_config:
