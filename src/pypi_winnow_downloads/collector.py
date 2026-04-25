@@ -21,9 +21,24 @@ logger = logging.getLogger(__name__)
 Runner = Callable[[Sequence[str], dict[str, str]], subprocess.CompletedProcess[str]]
 Clock = Callable[[], datetime]
 
-_BADGE_LABEL_TEMPLATE = "downloads ({days}d, non-CI)"
+_BADGE_LABEL_TEMPLATE = "pip*/uv/poetry/pdm ({days}d)"
 _BADGE_FILENAME_TEMPLATE = "downloads-{days}d-non-ci.json"
 _HEALTH_FILENAME = "_health.json"
+
+# Installer allowlist for the hero metric. We only count downloads whose
+# `details.installer.name` is one of the interactive Python packaging
+# tools — the population that approximates "real developers installing
+# the package." Mirror traffic (bandersnatch, Nexus, devpi), browser
+# fetches, scraper UAs (requests, curl), and unknown installers ("None")
+# are excluded. The badge label compresses this set as `pip*/uv/poetry/pdm`
+# where `pip*` means the pip-derived family — pip itself plus pipenv and
+# pipx (both delegate to pip and inherit its installer telemetry pattern).
+#
+# Lowercase comparison: pypinfo emits installer_name with the casing the
+# BigQuery schema records, which for these tools is lowercase. A
+# capitalized variant ("Pip", "PIP") indicates a different category
+# (some other UA reusing the name) and is correctly excluded.
+_INSTALLER_ALLOWLIST = frozenset({"pip", "uv", "poetry", "pdm", "pipenv", "pipx"})
 # pypinfo's own --timeout default is 120s. Pad to 180s so the BigQuery
 # call has its own budget plus startup/teardown overhead before our outer
 # subprocess.run() abort kicks in. A subprocess hang here would otherwise
@@ -92,6 +107,7 @@ def run_pypinfo(
         "--all",
         package,
         "ci",
+        "installer",
     ]
 
     # XDG_DATA_HOME isolation: pypinfo's get_credentials() (db.py:23-26 via
@@ -140,6 +156,15 @@ def run_pypinfo(
         # comparison would silently flip and start counting CI traffic as
         # non-CI; the non-dict-row guard above catches schema breaks loudly.
         if row.get("ci") == "True":
+            continue
+        # installer_name is required when we pivot by `installer`; missing
+        # the column means pypinfo's schema changed under us and we should
+        # fail loudly rather than silently undercount.
+        if "installer_name" not in row:
+            raise CollectorError(
+                f"pypinfo row for {package!r} missing 'installer_name' field: {row!r}"
+            )
+        if row["installer_name"] not in _INSTALLER_ALLOWLIST:
             continue
         count = row.get("download_count", 0)
         if not isinstance(count, int):

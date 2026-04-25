@@ -170,6 +170,16 @@ The collector overrides `XDG_DATA_HOME` per invocation, so any prior
   when it detects a CI environment variable. Misses CI environments pip
   doesn't recognize; falsely flags dev containers that export `CI=true`.
   The badge filter is meaningfully better than no filter, not perfect.
+- **The installer allowlist is fail-closed.** The hero badge counts only
+  rows whose `details.installer.name` is in
+  `{pip, uv, poetry, pdm, pipenv, pipx}` — the interactive Python
+  packaging-tool family. A future installer not in that set will be
+  silently excluded until the constant in
+  `src/pypi_winnow_downloads/collector.py` is updated. That's intentional
+  for a project whose pitch is honesty (better to undercount than to
+  silently sweep in a new traffic source), but it does mean operators
+  should re-evaluate the allowlist when a new mainstream packaging tool
+  shows up.
 - **Downloads ≠ installs ≠ usage.** The badge measures downloads (a
   Linehaul row per file fetch). Don't conflate it with installs (no
   telemetry) or "real users" (also no telemetry).
