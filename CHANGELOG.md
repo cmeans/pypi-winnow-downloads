@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **README closing line retired.** The bare `Pre-alpha. Not yet usable.`
+  was honest while the service was unbuilt; it became misleading after
+  the M3 deployment went live. Replaced with two short sections —
+  `## Install` (a `pip install` + `winnow-collect --config <path>`
+  walkthrough plus a pointer to `deploy/README.md` for the systemd +
+  Caddy reference deployment) and `## Status` (Alpha; reference
+  deployment running at `pypi-badges.intfar.com`; expect rough edges in
+  the 0.x series). The README is `pyproject.toml`'s `long_description`,
+  so it doubles as the PyPI project page — the new sections use
+  absolute GitHub URLs for cross-file links so they don't 404 on PyPI.
 - **Hero metric definition tightened.** The badge now counts only downloads
   whose `details.installer.name` is one of `pip`, `uv`, `poetry`, `pdm`,
   `pipenv`, or `pipx` (the interactive Python packaging-tool family) — in
