@@ -47,4 +47,24 @@ installer will be excluded until the allowlist in
 `src/pypi_winnow_downloads/collector.py` is updated explicitly. That's a feature
 for a project whose pitch is honesty.
 
-Pre-alpha. Not yet usable.
+## Install
+
+```
+pip install pypi-winnow-downloads
+```
+
+Run with a YAML config — copy [`config.example.yaml`](config.example.yaml) and edit:
+
+```
+winnow-collect --config /path/to/config.yaml
+```
+
+To deploy as a daily systemd timer plus a Caddy HTTPS service serving the
+output directory, see [`deploy/README.md`](deploy/README.md).
+
+## Status
+
+Alpha. Self-hosted reference deployment running at
+`pypi-badges.intfar.com`, producing daily badges for three target
+packages. Expect rough edges and possible breaking changes in the 0.x
+series.
