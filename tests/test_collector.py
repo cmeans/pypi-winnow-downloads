@@ -1,13 +1,19 @@
 import json
-import os
 import subprocess
+import sys
 import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from pypi_winnow_downloads.collector import CollectorError, collect, run_pypinfo
+from pypi_winnow_downloads import collector as collector_module
+from pypi_winnow_downloads.collector import (
+    CollectorError,
+    _resolve_pypinfo_path,
+    collect,
+    run_pypinfo,
+)
 from pypi_winnow_downloads.config import Config, PackageConfig, ServiceConfig
 
 
@@ -32,7 +38,14 @@ def test_run_pypinfo_invokes_pypinfo_with_expected_argv(tmp_path: Path) -> None:
 
     assert len(captured) == 1
     argv = captured[0]
-    assert argv[0] == "pypinfo"
+    # argv[0] is an absolute path to the pypinfo console script in the same
+    # venv as this Python interpreter, NOT the bare string "pypinfo". An
+    # absolute path skips PATH lookup entirely, which removes a class of
+    # install-layout-dependent failures (e.g., systemd's stripped PATH not
+    # including the venv bin) without per-deployment workarounds.
+    argv0 = Path(argv[0])
+    assert argv0.is_absolute(), f"argv[0] must be an absolute path, got {argv[0]!r}"
+    assert argv0.name in ("pypinfo", "pypinfo.exe")
     assert "--json" in argv
     assert argv[argv.index("--days") + 1] == "30"
     assert "--all" in argv
@@ -47,6 +60,21 @@ def test_run_pypinfo_invokes_pypinfo_with_expected_argv(tmp_path: Path) -> None:
     # be passed via the GOOGLE_APPLICATION_CREDENTIALS env var instead.
     assert "-a" not in argv
     assert "--auth" not in argv
+
+
+def test_resolve_pypinfo_path_neighbors_sys_executable() -> None:
+    """The resolver returns the pypinfo console script that lives in the
+    same directory as the running Python interpreter — i.e., the same
+    venv (or system bin dir) the package itself was installed into. This
+    is the layout pip + uv + setuptools-based installers all produce
+    when pypi-winnow-downloads pulls in pypinfo as a runtime dep, so the
+    resolved path always points at a real binary regardless of how the
+    user installed the package.
+    """
+    resolved = Path(_resolve_pypinfo_path())
+    assert resolved.is_absolute(), "resolver must return an absolute path"
+    assert resolved.parent == Path(sys.executable).parent
+    assert resolved.name in ("pypinfo", "pypinfo.exe")
 
 
 def test_run_pypinfo_passes_credential_via_env_var(tmp_path: Path) -> None:
@@ -84,7 +112,7 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
     subprocess pipe carried our credential env through.
     """
     obs_file = tmp_path / "observed.txt"
-    fake = tmp_path / "pypinfo"
+    fake = tmp_path / "fake-pypinfo"
     fake.write_text(
         textwrap.dedent(
             f"""\
@@ -100,7 +128,9 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
         )
     )
     fake.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    # Inject the fake's absolute path as the resolver's return value;
+    # _default_runner will call it directly via subprocess (no PATH lookup).
+    monkeypatch.setattr(collector_module, "_resolve_pypinfo_path", lambda: str(fake))
 
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
@@ -145,7 +175,7 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
     monkeypatch.setenv("XDG_DATA_HOME", str(polluted_xdg))
 
     obs_creds = tmp_path / "obs-creds.txt"
-    fake = tmp_path / "pypinfo"
+    fake = tmp_path / "fake-pypinfo"
     fake.write_text(
         textwrap.dedent(
             f"""\
@@ -177,7 +207,7 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
         )
     )
     fake.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(collector_module, "_resolve_pypinfo_path", lambda: str(fake))
 
     expected_creds = tmp_path / "expected-creds.json"
     expected_creds.write_text("{}")
