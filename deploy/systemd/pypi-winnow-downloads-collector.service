@@ -34,6 +34,16 @@ Group=winnow
 # to set it here.
 Environment=GOOGLE_APPLICATION_CREDENTIALS=/etc/pypi-winnow-downloads/gcp.json
 
+# Add the venv's bin to PATH so the collector's
+# `subprocess.run(["pypinfo", ...])` can resolve pypinfo. Required when
+# the package is installed into a venv at /opt/pypi-winnow-downloads/
+# (the layout deploy/README.md describes); harmless when pip installed
+# system-wide. Without this, the systemd-inherited PATH does not include
+# the venv's bin and the subprocess fails with EACCES on /root/.local/bin
+# (or ENOENT depending on host layout). If you install winnow-collect
+# into a different prefix, adjust the first PATH entry to match.
+Environment=PATH=/opt/pypi-winnow-downloads/bin:/usr/local/bin:/usr/bin:/bin
+
 ExecStart=/usr/local/bin/winnow-collect --config /etc/pypi-winnow-downloads/config.yaml
 WorkingDirectory=/var/lib/pypi-winnow-downloads
 

@@ -123,5 +123,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   polluted DB at the test process's `XDG_DATA_HOME` and asserts the env
   var still wins — exercising pypinfo's actual priority order, not just
   env transmission.
+- README's dogfood badge URL pointed at `downloads-30d.json`, but the
+  collector writes `downloads-30d-non-ci.json` (per
+  `_BADGE_FILENAME_TEMPLATE` in `collector.py`). After the M3 deploy went
+  live, shields.io 404'd and rendered "custom badge: resource not found"
+  instead of the actual count. URL now matches the live filename. The
+  dogfood-note prose was also refreshed: it previously said "shields.io
+  renders an error state, which is the correct signal for a pre-v1
+  project" — accurate while the deploy was pending, stale after M3 ship;
+  the new prose reflects deploy-live + pre-PyPI state (badge currently
+  shows `0`).
+- `deploy/systemd/pypi-winnow-downloads-collector.service` did not set
+  `PATH=`, so when the collector spawned `pypinfo` via `subprocess.run`,
+  systemd's inherited PATH (`/sbin:/bin:/usr/sbin:/usr/bin`) did not
+  include the venv's bin and the call failed at runtime — every package
+  recorded as a `CollectorError`. The example unit now sets
+  `Environment=PATH=/opt/pypi-winnow-downloads/bin:/usr/local/bin:/usr/bin:/bin`
+  with a comment block explaining why and how to adjust if the install
+  prefix differs. Caught at first deploy on CT 112; CI didn't catch it
+  because the existing checks all run at the Python level.
+- `deploy/README.md`'s install steps only symlinked `winnow-collect` into
+  `/usr/local/bin/`; `pypinfo` was missing, so even with PATH inherited
+  correctly the collector's subprocess for pypinfo wouldn't resolve.
+  Steps now use the venv-at-/opt pattern explicitly and symlink both
+  `winnow-collect` AND `pypinfo`. (Until the planned follow-up that
+  resolves pypinfo via `Path(sys.executable).parent` lands, the dual
+  symlink is the simplest install-time fix.)
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD
