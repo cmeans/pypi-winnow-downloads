@@ -182,9 +182,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deploy/README.md`'s install steps only symlinked `winnow-collect` into
   `/usr/local/bin/`; `pypinfo` was missing, so even with PATH inherited
   correctly the collector's subprocess for pypinfo wouldn't resolve.
-  Steps now use the venv-at-/opt pattern explicitly and symlink both
-  `winnow-collect` AND `pypinfo`. (Until the planned follow-up that
-  resolves pypinfo via `Path(sys.executable).parent` lands, the dual
-  symlink is the simplest install-time fix.)
+  Steps now use the venv-at-/opt pattern explicitly with a
+  `winnow-collect` symlink — pypinfo's symlink is no longer required as
+  of the resolver-based pypinfo lookup landed in this release (see the
+  "pypinfo resolved by absolute path" Changed entry above); the
+  collector finds pypinfo via `sys.executable`'s neighbor instead of
+  PATH.
 
 [Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.0.0...HEAD
