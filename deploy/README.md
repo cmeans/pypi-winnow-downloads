@@ -38,6 +38,11 @@ The reference deployment is bare systemd inside an LXC container on
 Proxmox. The Dockerfile and Compose example are provided for self-hosters
 on different stacks.
 
+If you'd rather skip Caddy + DDNS + router port-forwarding entirely,
+see [**Alternative HTTPS exposure: Tailscale
+Funnel**](#alternative-https-exposure-tailscale-funnel) below — that
+section is orthogonal to which runtime above you pick.
+
 ## Bare systemd (recommended for most self-hosts)
 
 Files:
@@ -147,6 +152,94 @@ BADGE_HOST=badges.example.com docker compose up -d caddy
 # Run the collector once (also schedule from host cron).
 docker compose --profile run-once run --rm collector
 ```
+
+## Alternative HTTPS exposure: Tailscale Funnel
+
+If you don't want to maintain Caddy + Let's Encrypt + DDNS + router
+port-forwarding, [Tailscale Funnel](https://tailscale.com/kb/1223/funnel)
+is a drop-in replacement for the public-HTTPS layer. Funnel routes
+inbound traffic from the public internet through Tailscale's relay to
+a port on your machine, with HTTPS terminated by Tailscale.
+
+This is orthogonal to the three runtime approaches above — the
+collector still runs as a systemd timer, host-cron'd Docker, or
+Compose `run-once`. Only the HTTPS-front-door changes. No files in
+this repo are specific to Funnel; Tailscale is configured via its
+CLI.
+
+**When to pick Funnel over Caddy + DDNS:**
+
+- Your router doesn't allow port-forwarding 80/443 (CGNAT, ISP
+  policy, work / dorm / coffee-shop network).
+- You'd rather not run an ACME flow on a residential IP that
+  rotates.
+- You'd rather not expose your home IP in public DNS.
+- You already run Tailscale and want one fewer moving part.
+
+**Trade-offs vs the canonical Caddy + DDNS setup:**
+
+- **URL is `<device>.<tailnet>.ts.net`** on the free Personal plan,
+  locked to your tailnet. Custom domains (`badges.example.com`)
+  require a paid plan. shields.io itself doesn't care what hostname
+  it polls; the badge URL just embeds the tailnet name and the
+  `<package>/downloads-30d-non-ci.json` path is unchanged.
+- **Funnel's public-facing HTTPS port must be 443, 8443, or 10000.**
+  The local service can listen on any port.
+- **Bandwidth limits exist** (Tailscale doesn't publish exact
+  figures). For a once-per-day JSON cached at shields.io's CDN this
+  is a non-issue; high-traffic services should test first.
+- **One more daemon to keep updated** — `tailscale` on the deploy
+  host.
+- **End-to-end encrypted.** Tailscale's relays cannot decrypt
+  traffic; your home IP stays hidden from clients.
+
+**Setup with bare systemd (one localhost file server + one funnel
+command):**
+
+```bash
+# 1. Install Tailscale on the host.
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# 2. Serve output_dir on a localhost port. Python's built-in server
+#    bound to 127.0.0.1 is the simplest option; Caddy or any other
+#    static-file server works equally well as long as it's
+#    localhost-only.
+sudo systemd-run --unit=winnow-fileserver \
+  --working-directory=/var/lib/pypi-winnow-downloads/output \
+  python3 -m http.server 8443 --bind 127.0.0.1
+
+# 3. Enable Funnel for the localhost port.
+sudo tailscale funnel --bg http://127.0.0.1:8443
+
+# 4. Find the public URL.
+sudo tailscale funnel status
+# https://<device>.<tailnet>.ts.net is now live, serving output_dir.
+
+# 5. Smoke-check.
+curl -sI https://<device>.<tailnet>.ts.net/<package>/downloads-30d-non-ci.json
+```
+
+The collector unit + timer from the **Bare systemd** section above
+remain unchanged. Skip the `sudo systemctl reload caddy` step and the
+router port-forward; Tailscale handles the rest.
+
+**Update the badge URL** in your README to point at the Funnel
+hostname (URL-encode the embedded `https://`):
+
+```markdown
+[![downloads](https://img.shields.io/endpoint?url=https%3A%2F%2F<device>.<tailnet>.ts.net%2F<package>%2Fdownloads-30d-non-ci.json)](https://pypi.org/project/<package>/)
+```
+
+**Tear down:**
+
+```bash
+sudo tailscale funnel --https=443 off
+sudo systemctl stop winnow-fileserver
+```
+
+Funnel only forwards while enabled; disabling immediately returns the
+box to tailnet-internal-only access.
 
 ## Required environment
 
