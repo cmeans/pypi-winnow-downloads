@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- README gains `## Acknowledgments` (pypinfo, shields.io, the
+  `bigquery-public-data.pypi.file_downloads` dataset) and `## License`
+  sections, plus a `© 2026 Chris Means` line. The repo has shipped
+  Apache 2.0 from day one (declared in `pyproject.toml` and `LICENSE`);
+  this just surfaces attribution and license at the README's footer
+  where readers expect it. Cross-file links use absolute GitHub URLs
+  so they don't 404 on the PyPI project page (the README is also
+  `pyproject.toml`'s `long_description`).
+
 ## [0.1.0] - 2026-04-24
 
 ### Changed

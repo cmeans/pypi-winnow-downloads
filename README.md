@@ -72,3 +72,26 @@ Alpha. Self-hosted reference deployment running at
 packages (the three seed packages in `config.example.yaml` plus
 `pypi-winnow-downloads` itself for the dogfood badge). Expect rough
 edges and possible breaking changes in the 0.x series.
+
+## Acknowledgments
+
+This project rests on three pieces of upstream work:
+
+- [pypinfo](https://github.com/ofek/pypinfo) by Ofek Lev: the BigQuery
+  query layer for the PyPI download dataset. `pypi-winnow-downloads` is
+  essentially a filter and badge writer wrapped around pypinfo.
+- [shields.io](https://shields.io/) renders the endpoint badges. The
+  collector emits the JSON shape that shields.io's
+  [endpoint badge](https://shields.io/badges/endpoint-badge) consumes,
+  so badges inherit its caching, theming, and SVG rendering.
+- The `bigquery-public-data.pypi.file_downloads` dataset, hosted by
+  Google as a public BigQuery dataset and populated by the PyPI
+  Linehaul pipeline, is the underlying data source. Without it, no
+  installer-level breakdown of PyPI downloads would be possible.
+
+## License
+
+Licensed under the
+[Apache License, Version 2.0](https://github.com/cmeans/pypi-winnow-downloads/blob/main/LICENSE).
+
+© 2026 Chris Means.
