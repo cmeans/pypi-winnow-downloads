@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Bump docker group: python 3.13-slim→3.14-slim** (#24)
 - **Bump github-actions group: codecov/codecov-action 5→6** (#23)
 - **`.github/dependabot.yml`** commit-message prefix changed from `"chore(deps)"` to `"chore"` across all three ecosystems (pip, github-actions, docker). Combined with the existing `include: "scope"` setting, this restores the canonical Dependabot title format `chore(deps): bump <pkg>` instead of the doubled `chore(deps)(deps): bump <pkg>` produced by the previous config (Dependabot auto-appends `(deps)` when `include: scope` is set, so the prefix must be bare). Surfaced live on PRs #23 and #24, which exhibited the doubled prefix.
 
