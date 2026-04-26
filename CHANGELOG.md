@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`.github/PULL_REQUEST_TEMPLATE.md`** auto-fills new human-authored PRs with Summary, Test plan, and CHANGELOG sections matching this repo's CI commands (`uv run pytest --cov`, `uv run ruff check src/ tests/`, `uv run ruff format --check src/ tests/`, `uv run mypy src/pypi_winnow_downloads/`). Dependabot bypasses PR templates by design and is handled separately by the new auto-CHANGELOG workflow.
+- **`.github/workflows/dependabot-changelog.yml`** auto-appends a `## [Unreleased]` → `### Changed` entry to Dependabot-authored PRs so they satisfy the per-PR CHANGELOG rule without manual intervention. Runs on `pull_request_target`, filters to `dependabot[bot]`, mints a GitHub App installation token via `actions/create-github-app-token`, fetches metadata via `dependabot/fetch-metadata@v3.1.0` (the v3 line fixed empty `prevVersion`/`newVersion` on grouped PRs), and pushes the CHANGELOG commit under the `cmeans-claude-dev[bot]` identity. The App-token push is the load-bearing piece: `secrets.GITHUB_TOKEN`-authored pushes do NOT re-trigger required `pull_request` checks (lint, typecheck, test) under GitHub's anti-loop policy, which would leave Dependabot PRs un-mergeable under the `main-protection` ruleset's required-status-checks rule. Loop guard skips when the last commit is already by the bot; idempotency guard skips when the PR number is already referenced in `CHANGELOG.md`. Operator must configure two repo secrets (`BOT_APP_ID`, `BOT_APP_PRIVATE_KEY`) before the workflow can run. Validated end-to-end on `cmeans/mcp-synology` (PRs #57 + #58 + #60 + #61, the latter being live verification on a real grouped Dependabot bump). Cross-repo playbook lives in awareness `dependabot-pr-hygiene-playbook`.
+
+### Changed
+
+- **`.github/dependabot.yml`** commit-message prefix changed from `"chore(deps)"` to `"chore"` across all three ecosystems (pip, github-actions, docker). Combined with the existing `include: "scope"` setting, this restores the canonical Dependabot title format `chore(deps): bump <pkg>` instead of the doubled `chore(deps)(deps): bump <pkg>` produced by the previous config (Dependabot auto-appends `(deps)` when `include: scope` is set, so the prefix must be bare). Surfaced live on PRs #23 and #24, which exhibited the doubled prefix.
+
 - `deploy/README.md` gains an `## Alternative HTTPS exposure:
   Tailscale Funnel` section documenting [Tailscale
   Funnel](https://tailscale.com/kb/1223/funnel) as a drop-in
