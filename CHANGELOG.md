@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bump github-actions group: codecov/codecov-action 5→6** (#23)
 - **`.github/dependabot.yml`** commit-message prefix changed from `"chore(deps)"` to `"chore"` across all three ecosystems (pip, github-actions, docker). Combined with the existing `include: "scope"` setting, this restores the canonical Dependabot title format `chore(deps): bump <pkg>` instead of the doubled `chore(deps)(deps): bump <pkg>` produced by the previous config (Dependabot auto-appends `(deps)` when `include: scope` is set, so the prefix must be bare). Surfaced live on PRs #23 and #24, which exhibited the doubled prefix.
 
+### Fixed
+
+- `README.md` line 11: canonicalized the [shields.io](https://shields.io/badges/endpoint-badge) doc link to match the form already used at line 96. Both references now point at the same canonical URL instead of relying on `/endpoint` redirecting to `/badges/endpoint-badge`. Closes #16.
+
 - `deploy/README.md` gains an `## Alternative HTTPS exposure:
   Tailscale Funnel` section documenting [Tailscale
   Funnel](https://tailscale.com/kb/1223/funnel) as a drop-in

@@ -8,7 +8,7 @@
 [![pip*/uv/poetry/pdm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
 
 Self-hosted PyPI download badge service that winnows CI traffic out of download
-counts. Produces [shields.io](https://shields.io/endpoint)-compatible endpoint
+counts. Produces [shields.io](https://shields.io/badges/endpoint-badge)-compatible endpoint
 badges filtered by BigQuery's `details.ci` flag *and* an interactive-installer
 allowlist (`pip`, `uv`, `poetry`, `pdm`, `pipenv`, `pipx`) — more honest than
 any existing alternative for small or young Python packages.
