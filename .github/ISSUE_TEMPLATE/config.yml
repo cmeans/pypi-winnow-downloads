@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: README / Install Guide
+    url: https://github.com/cmeans/pypi-winnow-downloads#install
+    about: Installation and configuration instructions
+  - name: Deploy reference
+    url: https://github.com/cmeans/pypi-winnow-downloads/blob/main/deploy/README.md
+    about: systemd, Docker, and Caddy deployment examples
