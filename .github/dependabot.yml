@@ -41,7 +41,7 @@ updates:
       - "dependencies"
       - "python"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
 
   # GitHub Actions used by .github/workflows/*.yml.
@@ -61,7 +61,7 @@ updates:
       - "dependencies"
       - "github-actions"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
 
   # Docker base image for deploy/docker/Dockerfile (one of the three
@@ -80,5 +80,5 @@ updates:
       - "dependencies"
       - "docker"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
