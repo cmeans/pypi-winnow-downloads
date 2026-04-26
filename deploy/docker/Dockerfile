@@ -16,7 +16,7 @@
 # collector with a Caddy static server sharing the output volume.
 
 # --- build stage --------------------------------------------------------
-FROM python:3.13-slim AS build
+FROM python:3.14-slim AS build
 
 RUN pip install --no-cache-dir uv==0.4.*
 
@@ -36,7 +36,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 RUN uv sync --frozen --no-dev --no-editable
 
 # --- runtime stage ------------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Non-root service account. The output directory is the only writable
 # path the collector touches; config + credential live read-only under
