@@ -1,0 +1,84 @@
+# Dependabot version-update configuration for pypi-winnow-downloads.
+#
+# Three ecosystems are tracked:
+#   - pip:            runtime + dev dependencies declared in
+#                     pyproject.toml (also picks up uv.lock so bumps
+#                     stay reproducible)
+#   - github-actions: workflow files under .github/workflows/
+#                     (CI matrix, publish workflows, label automation)
+#   - docker:         deploy/docker/Dockerfile base image (the
+#                     containerized deployment shape under deploy/)
+#
+# Schedule is weekly (Monday 06:00 America/Chicago) so PRs don't pile
+# up faster than they can be reviewed solo. Each ecosystem groups its
+# updates into a single PR per week to reduce notification noise.
+#
+# Labels named here are applied only if they already exist on the
+# repo; Dependabot does not auto-create labels. The label-automation
+# workflows handle the QA-flow labels separately.
+#
+# Docs:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Python deps: pyproject.toml + uv.lock at the repo root.
+  # Covers runtime (PyYAML, pypinfo) and dev extras (pytest,
+  # pytest-cov, ruff, mypy, types-PyYAML).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    groups:
+      python:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # GitHub Actions used by .github/workflows/*.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Docker base image for deploy/docker/Dockerfile (one of the three
+  # reference deployment shapes; the production reference deploy on
+  # CT 112 uses bare systemd, so this is for users who pick the
+  # Docker option).
+  - package-ecosystem: "docker"
+    directory: "/deploy/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
