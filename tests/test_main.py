@@ -84,3 +84,46 @@ def test_main_exits_nonzero_when_any_package_fails(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="broken"):
         main([f"--config={cfg}"], collector_fn=failing_collect)
+
+
+def test_main_exits_nonzero_when_health_file_write_fails(tmp_path: Path) -> None:
+    """A health-write failure must produce a structured exit message via
+    CollectorResult.health_write_error rather than letting an OSError escape
+    through to a raw traceback. Bug class from issue #32.
+    """
+    cfg = _valid_config(tmp_path)
+
+    def health_failed_collect(_cfg):
+        now = datetime(2026, 4, 24, 21, 0, 0, tzinfo=UTC)
+        return CollectorResult(
+            started=now,
+            finished=now,
+            outcomes=(PackageOutcome(package="ok-pkg", window_days=30, count=99),),
+            health_write_error="[Errno 28] No space left on device",
+        )
+
+    with pytest.raises(SystemExit, match=r"health file write failed.*No space left"):
+        main([f"--config={cfg}"], collector_fn=health_failed_collect)
+
+
+def test_main_combines_package_and_health_failure_messages(tmp_path: Path) -> None:
+    """When both a per-package failure AND a health-write failure occur, the
+    exit message reports both so the operator sees the full picture.
+    """
+    cfg = _valid_config(tmp_path)
+
+    def both_failed_collect(_cfg):
+        now = datetime(2026, 4, 24, 21, 0, 0, tzinfo=UTC)
+        return CollectorResult(
+            started=now,
+            finished=now,
+            outcomes=(
+                PackageOutcome(package="broken-pkg", window_days=30, count=None, error="boom"),
+            ),
+            health_write_error="[Errno 13] Permission denied",
+        )
+
+    with pytest.raises(
+        SystemExit, match=r"broken-pkg.*health file write failed.*Permission denied"
+    ):
+        main([f"--config={cfg}"], collector_fn=both_failed_collect)

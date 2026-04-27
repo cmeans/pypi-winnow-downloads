@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **collector: `_write_health` `OSError` no longer escapes per-package isolation.** A failure inside the health-file write step (disk full, output dir not writable, atomic-replace cross-device, etc.) used to propagate as an unhandled `OSError` traceback through `__main__.main()`, bypassing the structured `winnow-collect: N package(s) failed: …` exit message and producing a raw exit. The fix wraps `_write_health(...)` inside `collect()` with `try/except OSError`, logs the failure, and surfaces it via a new `CollectorResult.health_write_error: str | None` field (default `None`, backward-compat). `__main__.main()` now combines per-package failures and health-write failures into one structured exit message (`winnow-collect: 2 package(s) failed: foo, bar; health file write failed: [Errno 28] No space left on device`). Adds `test_collect_health_write_oserror_recorded_not_raised` (monkeypatches `os.replace` to raise `ENOSPC` only on the health file) and `test_main_combines_package_and_health_failure_messages` for regression coverage. Closes #32.
 - `README.md` line 11: canonicalized the [shields.io](https://shields.io/badges/endpoint-badge) doc link to match the form already used at line 96. Both references now point at the same canonical URL instead of relying on `/endpoint` redirecting to `/badges/endpoint-badge`. Closes #16.
 
 - `deploy/README.md` gains an `## Alternative HTTPS exposure:

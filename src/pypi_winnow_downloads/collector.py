@@ -85,6 +85,7 @@ class CollectorResult:
     started: datetime
     finished: datetime
     outcomes: tuple[PackageOutcome, ...]
+    health_write_error: str | None = None
 
     @property
     def failures(self) -> tuple[PackageOutcome, ...]:
@@ -207,8 +208,24 @@ def collect(
         outcomes.append(outcome)
 
     finished = clock()
-    _write_health(config.service.output_dir, started, finished, outcomes)
-    return CollectorResult(started=started, finished=finished, outcomes=tuple(outcomes))
+    health_write_error: str | None = None
+    try:
+        _write_health(config.service.output_dir, started, finished, outcomes)
+    except OSError as e:
+        # Mirror the per-package isolation contract one level up: a write
+        # failure here (disk full, output dir not writable, cross-device
+        # atomic-replace, etc.) must not propagate as a raw traceback that
+        # bypasses the structured exit path in __main__. Surface via
+        # CollectorResult.health_write_error so the caller can fold it
+        # into the exit message.
+        logger.error("collector: failed to write _health.json: %s", e)
+        health_write_error = str(e)
+    return CollectorResult(
+        started=started,
+        finished=finished,
+        outcomes=tuple(outcomes),
+        health_write_error=health_write_error,
+    )
 
 
 def _collect_one(
