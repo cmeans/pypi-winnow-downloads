@@ -15,6 +15,41 @@
 # Verify after first hit:
 #   curl -sI https://<your-host>/<some-package>/downloads-30d-non-ci.json
 # A 200 with Content-Type: application/json means you're good.
+#
+# Logging (see "global options" + per-site "log" blocks below):
+#   /var/log/caddy/error.log    server-level errors (ACME, config, panic)
+#   /var/log/caddy/access.log   per-request entries in JSON
+# Both files use Caddy's built-in lumberjack rotation (size + count + age),
+# so no separate logrotate config is required. The Caddy package's
+# postinst creates /var/log/caddy/ owned by caddy:caddy, which is what
+# the daemon needs to open these files for writing.
+#
+# Gotcha: never run `caddy validate` against this file as root before
+# the daemon has had a chance to create the log files itself. Doing so
+# pre-creates /var/log/caddy/{error,access}.log as root:root with mode
+# 0600, which the caddy daemon (running as user `caddy`) then can't
+# open — reload fails with "permission denied" and the unit gets stuck
+# in `reloading`. If this happens: chown caddy:caddy on the log files
+# and `systemctl restart caddy` to recover.
+
+# --- global options -----------------------------------------------------
+#
+# Server-level (non-request) errors land in /var/log/caddy/error.log
+# with built-in size + count + age rotation. Without this, errors go
+# to stdout and only journalctl -u caddy captures them, which is hard
+# to grep across a long window. Keep these longer than access logs
+# because they're rare and forensically valuable.
+{
+	log default {
+		output file /var/log/caddy/error.log {
+			roll_size 50MiB
+			roll_keep 10
+			roll_keep_for 2160h  # 90 days
+		}
+		level ERROR
+		format json
+	}
+}
 
 {$BADGE_HOST:badges.example.com} {
 	# Static file serving from the collector's output directory. Caddy
@@ -43,8 +78,20 @@
 
 	encode zstd gzip
 
-	# Log to stdout so journalctl -u caddy captures it.
+	# Per-site access log (request/response). JSON format is parseable
+	# by jq, fluentd, vector, etc. Caddy's built-in lumberjack rotation
+	# keeps disk usage bounded without needing logrotate.
+	#   roll_size       100MiB  — rotate when file hits this size
+	#   roll_keep       14      — keep at most 14 rotated files (~1.4 GB ceiling)
+	#   roll_keep_for   720h    — 30 days; older rotations are deleted
+	# Low-traffic badge service: a single 100 MiB log file may last
+	# weeks, so retention is effectively bounded by roll_keep_for.
 	log {
-		output stdout
+		output file /var/log/caddy/access.log {
+			roll_size 100MiB
+			roll_keep 14
+			roll_keep_for 720h  # 30 days
+		}
+		format json
 	}
 }
