@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-26
+
 ### Added
 
 - **`deploy/caddy/Caddyfile.example`** gains a global `log default` block writing server-level errors to `/var/log/caddy/error.log` (level `ERROR`, JSON, rotated `roll_size 50MiB` / `roll_keep 10` / `roll_keep_for 2160h` = 90 days) and a per-site access log at `/var/log/caddy/access.log` (JSON, rotated `roll_size 100MiB` / `roll_keep 14` / `roll_keep_for 720h` = 30 days). Replaces the single `log { output stdout }` stanza that buried request data inside `journalctl -u caddy` with no separate error-vs-access split and no rotation knobs. Caddy's built-in lumberjack handles rotation natively — no `logrotate` config required. Header comment documents a sharp gotcha discovered while rolling this out on the production deployment: running `caddy validate` against the Caddyfile *as root* pre-creates `/var/log/caddy/{error,access}.log` as `root:root 0600`, which the caddy daemon (running as user `caddy`) can't open on reload, leaving the systemd unit stuck in `reloading` state. Validate as the `caddy` user, or chown the log files before reloading. `deploy/README.md` "Pick an approach" table updated in the same PR — the Bare systemd row's pros now read "Collector logs to journal; Caddy logs to rotated files under `/var/log/caddy/`" instead of the previous "Native journal logging" claim, which became misleading once Caddy stopped writing to `journalctl -u caddy`.
@@ -253,5 +255,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collector finds pypinfo via `sys.executable`'s neighbor instead of
   PATH.
 
-[Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cmeans/pypi-winnow-downloads/releases/tag/v0.1.0
