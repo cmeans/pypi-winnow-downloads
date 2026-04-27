@@ -211,3 +211,37 @@ def test_load_config_raises_configerror_on_null_package_name(tmp_path: Path) -> 
 
     with pytest.raises(ConfigError, match=r"packages\[0\]\.name"):
         load_config(config_path)
+
+
+def test_load_config_rejects_non_mapping_service_value(tmp_path: Path) -> None:
+    """`service: just-a-string` (or any non-mapping at the service key) must
+    raise ConfigError via _require_field's isinstance check. Locks in the
+    defensive raise at config.py:42 — fires when YAML supplies a scalar
+    where a mapping is required.
+    """
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service: just-a-string\npackages:\n  - name: foo\n    window_days: 30\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"'service' must be a mapping, got str"):
+        load_config(config_path)
+
+
+def test_load_config_rejects_non_list_packages_value(tmp_path: Path) -> None:
+    """`packages: 42` (a non-list, non-null scalar) must raise ConfigError
+    distinct from the null-packages branch immediately above. Locks in the
+    isinstance check at config.py:86, which the existing null-packages
+    test does NOT exercise (separate branches).
+    """
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "service:\n"
+        f"  output_dir: {tmp_path / 'out'}\n"
+        f"  credential_file: {tmp_path / 'creds.json'}\n"
+        "  stale_threshold_days: 3\n"
+        "packages: 42\n"
+    )
+
+    with pytest.raises(ConfigError, match=r"'packages' must be a list, got int"):
+        load_config(config_path)

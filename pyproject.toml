@@ -57,6 +57,20 @@ minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers --strict-config"
 
+[tool.coverage.run]
+# Measure only the package source, not the tests themselves. The "Missing"
+# column on tests stayed at 0 historically because they don't have defensive
+# branches, so excluding them keeps the report focused on production code.
+source = ["src/pypi_winnow_downloads"]
+
+[tool.coverage.report]
+# Fail CI if statement coverage drops below 100%. No `# pragma: no cover`
+# annotations or `exclude_lines` patterns — every line either has a real
+# test or is deleted as dead code (see issue #37 / PR for the five
+# previously-uncovered defensive lines that motivated this gate).
+fail_under = 100
+show_missing = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
