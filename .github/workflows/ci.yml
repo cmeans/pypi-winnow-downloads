@@ -71,3 +71,44 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  deploy-smoke:
+    # Catches breakages that the Python-only matrix can't see — e.g.
+    # PR #6 round 1 shipped a Dockerfile whose runtime stage left the
+    # venv installed in editable mode pointing at a non-existent /src,
+    # so `import pypi_winnow_downloads` failed at startup. Lint, type
+    # checks, and pytest were all green; the bug only surfaced when QA
+    # ran the container by hand. This job exercises the deploy/
+    # examples that the docs in deploy/README.md tell users to copy.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -f deploy/docker/Dockerfile -t pypi-winnow-downloads:smoke .
+
+      - name: Verify entrypoint resolves (winnow-collect --help)
+        # Override the Dockerfile's ENTRYPOINT so we can pass --help
+        # without also passing the hardcoded --config flag (which would
+        # require a config file the container doesn't ship). Exit 0 from
+        # --help is the smoke signal that the venv links resolve and
+        # `import pypi_winnow_downloads` works.
+        run: docker run --rm --entrypoint /opt/venv/bin/winnow-collect pypi-winnow-downloads:smoke --help
+
+      - name: Validate Compose example syntax
+        env:
+          # compose.yml.example uses ${BADGE_HOST:?…} so `compose config`
+          # errors without it. Any non-empty placeholder works.
+          BADGE_HOST: badges.example.com
+        run: docker compose -f deploy/docker/compose.yml.example config
+
+      - name: Validate Caddyfile example syntax
+        # Mount the deploy/caddy/ directory into the official caddy:2
+        # image and run `caddy validate` against the example. Catches
+        # syntax-level breakage and confirms the Caddyfile parses with
+        # the version users will most likely run.
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/deploy/caddy:/etc/caddy:ro" \
+            caddy:2 \
+            caddy validate --config /etc/caddy/Caddyfile.example --adapter caddyfile
