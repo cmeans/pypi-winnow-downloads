@@ -439,6 +439,32 @@ def test_run_pypinfo_raises_on_non_dict_row(tmp_path: Path) -> None:
         run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
 
+def test_run_pypinfo_raises_on_non_integer_download_count(tmp_path: Path) -> None:
+    """pypinfo's BigQuery output normally has int `download_count` values.
+    A row with a non-int (e.g., a string from a malformed/changed query
+    response) must raise CollectorError rather than silently coerce or
+    pass a bad type into downstream sums and badge JSON. Locks in the
+    defensive raise at collector.py:190.
+    """
+    stdout = json.dumps(
+        {
+            "rows": [
+                {"ci": "False", "download_count": "not-an-int", "installer_name": "pip"},
+            ],
+            "query": {},
+        }
+    )
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return _ok_result(argv, stdout=stdout)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    with pytest.raises(CollectorError, match=r"non-integer download_count"):
+        run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+
 def test_run_pypinfo_raises_on_subprocess_timeout(tmp_path: Path) -> None:
     def slow_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd=list(argv), timeout=180)

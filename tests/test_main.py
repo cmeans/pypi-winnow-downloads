@@ -1,8 +1,10 @@
+import runpy
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from pypi_winnow_downloads import collector as collector_module
 from pypi_winnow_downloads.__main__ import main
 from pypi_winnow_downloads.collector import CollectorResult, PackageOutcome
 
@@ -127,3 +129,33 @@ def test_main_combines_package_and_health_failure_messages(tmp_path: Path) -> No
         SystemExit, match=r"broken-pkg.*health file write failed.*Permission denied"
     ):
         main([f"--config={cfg}"], collector_fn=both_failed_collect)
+
+
+def test_main_module_invokes_main_when_run_as_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`if __name__ == "__main__": main()` at __main__.py:52 fires when the
+    package is invoked as `python -m pypi_winnow_downloads`. Use
+    `runpy.run_module` with `run_name="__main__"` to exercise the same code
+    path in-process so the line is observed by coverage.
+
+    Stub `collector.collect` to a no-op CollectorResult so we don't shell out
+    to pypinfo; main() will see no failures and return without SystemExit.
+    """
+    cfg = _valid_config(tmp_path)
+    now = datetime(2026, 4, 24, 21, 0, 0, tzinfo=UTC)
+
+    def stub_collect(_config: object) -> CollectorResult:
+        return CollectorResult(started=now, finished=now, outcomes=())
+
+    # __main__.py does `from .collector import collect`, which reads the
+    # `collect` attribute on the collector module at import time. Patching
+    # collector_module.collect BEFORE runpy.run_module ensures the freshly
+    # executed __main__.py picks up the stub.
+    monkeypatch.setattr(collector_module, "collect", stub_collect)
+    monkeypatch.setattr("sys.argv", ["winnow-collect", "--config", str(cfg)])
+
+    # run_name="__main__" makes the guard at line 52 evaluate True. With
+    # zero failures returned by the stub, main() falls through cleanly
+    # (no SystemExit).
+    runpy.run_module("pypi_winnow_downloads", run_name="__main__")
