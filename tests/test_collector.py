@@ -782,3 +782,71 @@ def test_collect_staleness_silent_on_future_previous_finished(
         collect(config, clock=_frozen_clock(now), runner=runner)
 
     assert not any("previous successful run" in r.message for r in caplog.records)
+
+
+def test_collect_staleness_silent_on_unreadable_previous_health(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Previous _health.json path exists but cannot be read as a file
+    (IsADirectoryError, PermissionError, or any other OSError outside the
+    FileNotFoundError branch). The check must not raise — degrade silently
+    and log at DEBUG so operators can grep but the run itself proceeds.
+    Locks in the documented 'OSError other than FileNotFoundError'
+    graceful-failure mode that QA flagged as untested in PR #36 round 1.
+
+    Approach: create _health.json as a *directory*, so Path.read_text
+    raises IsADirectoryError (a real OSError) at the OS layer. No
+    monkeypatching needed; the OS does the work, and there's no
+    test-side fallback path to worry about covering.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    config.service.output_dir.mkdir(parents=True, exist_ok=True)
+    # _health.json is a directory, not a file. Path.read_text raises
+    # IsADirectoryError, which is an OSError but NOT a FileNotFoundError.
+    (config.service.output_dir / "_health.json").mkdir()
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    with caplog.at_level("DEBUG", logger="pypi_winnow_downloads.collector"):
+        result = collect(config, clock=_frozen_clock(now), runner=runner)
+
+    # No warning fired; no exception escaped.
+    assert not any("previous successful run" in r.message for r in caplog.records)
+    assert result.failures == ()
+
+    # DEBUG log carries the failure for grep-ability per the documented
+    # contract. IsADirectoryError stringifies with the OS message; the
+    # word "directory" is consistent across Linux/macOS.
+    debug_records = [r for r in caplog.records if "cannot read previous _health.json" in r.message]
+    assert len(debug_records) == 1
+    assert debug_records[0].levelname == "DEBUG"
+    assert "directory" in debug_records[0].getMessage().lower()
+
+
+def test_collect_staleness_silent_on_previous_health_missing_finished_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Previous _health.json parses as JSON but the `finished` field is
+    missing (manually edited, partial-write atomicity break, schema drift).
+    Same silent-degrade contract as the malformed-JSON path. Independent
+    branch coverage for the KeyError arm of the JSON-parse except.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    config.service.output_dir.mkdir(parents=True, exist_ok=True)
+    # Valid JSON, valid shape — just no `finished` key.
+    (config.service.output_dir / "_health.json").write_text(
+        json.dumps({"started": "2026-04-20T00:00:00+00:00", "packages": {}})
+    )
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    with caplog.at_level("DEBUG", logger="pypi_winnow_downloads.collector"):
+        result = collect(config, clock=_frozen_clock(now), runner=runner)
+
+    assert not any("previous successful run" in r.message for r in caplog.records)
+    assert result.failures == ()
+
+    # The KeyError surfaces through the documented DEBUG log.
+    debug_records = [r for r in caplog.records if "previous _health.json unparseable" in r.message]
+    assert len(debug_records) == 1
+    assert debug_records[0].levelname == "DEBUG"
