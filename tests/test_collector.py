@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 import textwrap
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -668,3 +668,185 @@ def test_collect_health_write_oserror_recorded_not_raised(
     # Health-write failure surfaces structurally.
     assert result.health_write_error is not None
     assert "No space left on device" in result.health_write_error
+
+
+# --- staleness check (issue #33) ---
+
+
+def _frozen_clock(when: datetime):
+    """Return a Clock that always emits `when`. Tests vary the freeze
+    point relative to a previous run's _health.json to exercise the
+    staleness boundaries.
+    """
+    return lambda: when
+
+
+def _seed_previous_health(output_dir: Path, finished: datetime) -> None:
+    """Write a minimal _health.json that the staleness check can parse."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "started": finished.isoformat(),
+        "finished": finished.isoformat(),
+        "packages": {},
+    }
+    (output_dir / "_health.json").write_text(json.dumps(payload))
+
+
+def test_collect_staleness_warning_fires_when_previous_run_too_old(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    # Threshold is 3 days; seed a previous run 7 days before "now".
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    previous_finished = now - timedelta(days=7)
+    _seed_previous_health(config.service.output_dir, previous_finished)
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    with caplog.at_level("WARNING", logger="pypi_winnow_downloads.collector"):
+        collect(config, clock=_frozen_clock(now), runner=runner)
+
+    matching = [r for r in caplog.records if "previous successful run" in r.message]
+    assert len(matching) == 1, (
+        f"expected one staleness warning, got: {[r.message for r in caplog.records]}"
+    )
+    assert matching[0].levelname == "WARNING"
+    assert "7.0 days old" in matching[0].getMessage()
+    assert "threshold: 3 days" in matching[0].getMessage()
+
+
+def test_collect_staleness_silent_when_previous_run_within_threshold(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    # 1 day old, threshold 3 — should NOT warn.
+    _seed_previous_health(config.service.output_dir, now - timedelta(days=1))
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    with caplog.at_level("WARNING", logger="pypi_winnow_downloads.collector"):
+        collect(config, clock=_frozen_clock(now), runner=runner)
+
+    assert not any("previous successful run" in r.message for r in caplog.records)
+
+
+def test_collect_staleness_silent_on_first_run_no_previous_health(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """First-ever collector run has no _health.json on disk yet. Staleness
+    check must be silent — not log a spurious warning, not error out.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    # output_dir intentionally does NOT exist; mkdir happens in _write_health.
+    assert not config.service.output_dir.exists()
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    with caplog.at_level("WARNING", logger="pypi_winnow_downloads.collector"):
+        result = collect(config, clock=_frozen_clock(now), runner=runner)
+
+    assert result.failures == ()
+    assert not any("previous successful run" in r.message for r in caplog.records)
+
+
+def test_collect_staleness_silent_on_malformed_previous_health(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A corrupt _health.json must NOT take down the run. The check
+    degrades to silent (DEBUG-logged) and the run proceeds.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    config.service.output_dir.mkdir(parents=True, exist_ok=True)
+    (config.service.output_dir / "_health.json").write_text("not json at all")
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    with caplog.at_level("WARNING", logger="pypi_winnow_downloads.collector"):
+        result = collect(config, clock=_frozen_clock(now), runner=runner)
+
+    assert result.failures == ()
+    assert not any("previous successful run" in r.message for r in caplog.records)
+
+
+def test_collect_staleness_silent_on_future_previous_finished(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Clock skew or hand-edited file: previous finished is in the future
+    relative to now. Don't emit a negative-age warning; just silently skip.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    _seed_previous_health(config.service.output_dir, now + timedelta(days=2))
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    with caplog.at_level("WARNING", logger="pypi_winnow_downloads.collector"):
+        collect(config, clock=_frozen_clock(now), runner=runner)
+
+    assert not any("previous successful run" in r.message for r in caplog.records)
+
+
+def test_collect_staleness_silent_on_unreadable_previous_health(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Previous _health.json path exists but cannot be read as a file
+    (IsADirectoryError, PermissionError, or any other OSError outside the
+    FileNotFoundError branch). The check must not raise — degrade silently
+    and log at DEBUG so operators can grep but the run itself proceeds.
+    Locks in the documented 'OSError other than FileNotFoundError'
+    graceful-failure mode that QA flagged as untested in PR #36 round 1.
+
+    Approach: create _health.json as a *directory*, so Path.read_text
+    raises IsADirectoryError (a real OSError) at the OS layer. No
+    monkeypatching needed; the OS does the work, and there's no
+    test-side fallback path to worry about covering.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    config.service.output_dir.mkdir(parents=True, exist_ok=True)
+    # _health.json is a directory, not a file. Path.read_text raises
+    # IsADirectoryError, which is an OSError but NOT a FileNotFoundError.
+    (config.service.output_dir / "_health.json").mkdir()
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    with caplog.at_level("DEBUG", logger="pypi_winnow_downloads.collector"):
+        result = collect(config, clock=_frozen_clock(now), runner=runner)
+
+    # No warning fired; no exception escaped.
+    assert not any("previous successful run" in r.message for r in caplog.records)
+    assert result.failures == ()
+
+    # DEBUG log carries the failure for grep-ability per the documented
+    # contract. IsADirectoryError stringifies with the OS message; the
+    # word "directory" is consistent across Linux/macOS.
+    debug_records = [r for r in caplog.records if "cannot read previous _health.json" in r.message]
+    assert len(debug_records) == 1
+    assert debug_records[0].levelname == "DEBUG"
+    assert "directory" in debug_records[0].getMessage().lower()
+
+
+def test_collect_staleness_silent_on_previous_health_missing_finished_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Previous _health.json parses as JSON but the `finished` field is
+    missing (manually edited, partial-write atomicity break, schema drift).
+    Same silent-degrade contract as the malformed-JSON path. Independent
+    branch coverage for the KeyError arm of the JSON-parse except.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    config.service.output_dir.mkdir(parents=True, exist_ok=True)
+    # Valid JSON, valid shape — just no `finished` key.
+    (config.service.output_dir / "_health.json").write_text(
+        json.dumps({"started": "2026-04-20T00:00:00+00:00", "packages": {}})
+    )
+
+    runner = _fake_runner_for({"mcp-clipboard": 99})
+    now = datetime(2026, 4, 27, 0, 0, 0, tzinfo=UTC)
+    with caplog.at_level("DEBUG", logger="pypi_winnow_downloads.collector"):
+        result = collect(config, clock=_frozen_clock(now), runner=runner)
+
+    assert not any("previous successful run" in r.message for r in caplog.records)
+    assert result.failures == ()
+
+    # The KeyError surfaces through the documented DEBUG log.
+    debug_records = [r for r in caplog.records if "previous _health.json unparseable" in r.message]
+    assert len(debug_records) == 1
+    assert debug_records[0].levelname == "DEBUG"
