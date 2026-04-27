@@ -201,6 +201,11 @@ def collect(
     runner: Runner = _default_runner,
 ) -> CollectorResult:
     started = clock()
+    _check_staleness(
+        output_dir=config.service.output_dir,
+        threshold_days=config.service.stale_threshold_days,
+        now=started,
+    )
     outcomes: list[PackageOutcome] = []
 
     for pkg in config.packages:
@@ -261,6 +266,54 @@ def _collect_one(
 
     logger.info("collector: wrote badge for %s (count=%d, path=%s)", pkg.name, count, badge_path)
     return PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count)
+
+
+def _check_staleness(
+    output_dir: Path,
+    threshold_days: int,
+    now: datetime,
+) -> None:
+    """Read the previous run's _health.json and emit a logger.warning if its
+    `finished` timestamp is older than `threshold_days` ago. Log-only — does
+    NOT mutate badge JSON. Per `config.example.yaml`'s documented contract.
+
+    No-op (silent) when:
+    - The previous _health.json doesn't exist (first run, fresh deploy)
+    - The file exists but is unreadable / unparseable / missing the
+      `finished` field (logged at DEBUG so operators can grep, but the
+      collector run itself proceeds)
+    - The previous `finished` is in the future relative to `now` (clock
+      skew, manually-edited file) — silently skip
+    """
+    health_path = output_dir / _HEALTH_FILENAME
+    try:
+        raw = health_path.read_text()
+    except FileNotFoundError:
+        return
+    except OSError as e:
+        logger.debug("collector: cannot read previous _health.json for staleness check: %s", e)
+        return
+
+    try:
+        payload = json.loads(raw)
+        finished_raw = payload["finished"]
+        previous_finished = datetime.fromisoformat(finished_raw)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        logger.debug("collector: previous _health.json unparseable for staleness check: %s", e)
+        return
+
+    age = now - previous_finished
+    if age.total_seconds() < 0:
+        return  # clock skew or hand-edited file
+    age_days = age.total_seconds() / 86400.0
+    if age_days > threshold_days:
+        logger.warning(
+            "collector: previous successful run is %.1f days old (threshold: %d days); "
+            "previous finished: %s",
+            age_days,
+            threshold_days,
+            previous_finished.isoformat(),
+        )
 
 
 def _write_health(
