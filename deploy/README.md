@@ -30,7 +30,7 @@ flowchart LR
 
 | Approach | What you copy | Pros | Cons |
 | --- | --- | --- | --- |
-| **Bare systemd** (Linux host or LXC) | `systemd/`, `caddy/Caddyfile.example` | Smallest moving parts. Predictable. Native journal logging. | Linux-only. Manual user/dir setup. |
+| **Bare systemd** (Linux host or LXC) | `systemd/`, `caddy/Caddyfile.example` | Smallest moving parts. Predictable. Collector logs to journal; Caddy logs to rotated files under `/var/log/caddy/`. | Linux-only. Manual user/dir setup. |
 | **Docker, host-scheduled** | `docker/Dockerfile`, host cron entry | Works anywhere Docker runs. No host Python. | Host scheduling required. No native log integration. |
 | **Docker Compose** | `docker/Dockerfile`, `docker/compose.yml.example`, `caddy/Caddyfile.example` | Single declarative file. Caddy + collector together. | Compose has no scheduler — still need host cron. Two-step bring-up. |
 
