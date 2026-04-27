@@ -37,9 +37,15 @@ def main(
 
     result = collector_fn(config)
 
+    problems: list[str] = []
     if result.failures:
         names = ", ".join(f.package for f in result.failures)
-        sys.exit(f"winnow-collect: {len(result.failures)} package(s) failed: {names}")
+        problems.append(f"{len(result.failures)} package(s) failed: {names}")
+    if result.health_write_error:
+        problems.append(f"health file write failed: {result.health_write_error}")
+
+    if problems:
+        sys.exit(f"winnow-collect: {'; '.join(problems)}")
 
 
 if __name__ == "__main__":

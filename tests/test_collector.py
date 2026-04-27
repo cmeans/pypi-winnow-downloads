@@ -628,3 +628,43 @@ def test_collect_result_reports_no_failures_on_full_success(tmp_path: Path) -> N
     assert len(result.outcomes) == 1
     assert result.outcomes[0].package == "mcp-clipboard"
     assert result.outcomes[0].count == 142
+    assert result.health_write_error is None
+
+
+def test_collect_health_write_oserror_recorded_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failure inside _write_health (disk full, perms, cross-device replace,
+    etc.) must surface via CollectorResult.health_write_error rather than
+    propagating as a raw OSError that bypasses the structured exit path in
+    __main__. Per-package outcomes must still be returned intact so the
+    operator can see what completed before the health-write step failed.
+    """
+    config = _make_config(tmp_path, [PackageConfig(name="mcp-clipboard", window_days=30)])
+    runner = _fake_runner_for({"mcp-clipboard": 142})
+
+    # Force os.replace to raise OSError as the final step of _write_health.
+    # The badge-write path uses Path.replace via badge.write_badge, so target
+    # the collector module's os.replace specifically.
+    real_replace = collector_module.os.replace
+
+    def raising_replace(src: object, dst: object) -> None:
+        # Only raise for the health file; let badge writes use the real call.
+        if str(dst).endswith("_health.json"):
+            raise OSError(28, "No space left on device")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(collector_module.os, "replace", raising_replace)
+
+    # Should NOT raise.
+    result = collect(config, runner=runner)
+
+    # Per-package outcome still recorded.
+    assert len(result.outcomes) == 1
+    assert result.outcomes[0].package == "mcp-clipboard"
+    assert result.outcomes[0].count == 142
+    assert result.failures == ()
+
+    # Health-write failure surfaces structurally.
+    assert result.health_write_error is not None
+    assert "No space left on device" in result.health_write_error
