@@ -18,7 +18,7 @@
 # --- build stage --------------------------------------------------------
 FROM python:3.14-slim AS build
 
-RUN pip install --no-cache-dir uv==0.4.*
+RUN pip install --no-cache-dir 'uv>=0.5,<1'
 
 WORKDIR /src
 COPY pyproject.toml uv.lock README.md LICENSE ./
