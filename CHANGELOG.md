@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`.github/workflows/dependabot-changelog.yml`** subsection-insertion logic now respects Keep-a-Changelog v1.1.0 ordering (Added → Changed → Deprecated → Removed → Fixed → Security). Previously, when `## [Unreleased]` already had `### Added` (or any subsection that sorts after `### Changed`) but no `### Changed` block, the auto-CHANGELOG workflow inserted the new `### Changed` at `unreleased_idx + 1` regardless — producing out-of-order subsections (e.g., `### Changed` above `### Added`). Dormant on this repo until the v0.1.1 release, would have manifested on the next Dependabot bump after a release with only `### Added` in fresh Unreleased. The fix walks forward from `## Unreleased` to find either the first subsection that should sort AFTER `### Changed`, or the next `## ` release heading, and inserts before whichever comes first. Cascaded from the validated `cmeans/mcp-synology` PR #63 fix (squash 8a4df0d, merged 2026-04-26 23:24Z); upstream QA's algorithm-extraction smoke test against six KaC layouts (empty / Added-only / Changed-already / Added+Fixed / Fixed-only / bracketless) was reproduced locally on the cascaded fix — all six pass. Closes #26.
+
 ## [0.1.2] - 2026-04-27
 
 ### Fixed
