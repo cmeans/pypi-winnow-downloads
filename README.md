@@ -14,13 +14,13 @@ allowlist (`pip`, `uv`, `poetry`, `pdm`, `pipenv`, `pipx`) — more honest than
 any existing alternative for small or young Python packages.
 
 > The `pip*/uv/poetry/pdm` badge above is served by this project itself —
-> eating our own dogfood. The endpoint went live with milestone M3 deployment
-> on 2026-04-24 and currently shows `0` until the first release lands on PyPI;
-> after that the count climbs automatically.
+> eating our own dogfood. The endpoint went live on 2026-04-24 alongside
+> the v0.1.0 release; the daily collector run keeps it current.
 
 ## What the badge actually counts
 
-The hero badge — labelled `pip*/uv/poetry/pdm (Nd)` — counts downloads that meet
+The hero badge — labelled `pip*/uv/poetry/pdm (Nd)` (N=30 in the reference
+deployment, configurable per-package via `window_days`) — counts downloads that meet
 **all** of these conditions over the configured rolling window:
 
 - `details.ci != True` (BigQuery's CI-detection flag is not set)
