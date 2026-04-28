@@ -11,7 +11,7 @@ body:
     attributes:
       label: Version
       description: Output of `pip show pypi-winnow-downloads` or commit hash
-      placeholder: "0.1.0 or abc1234"
+      placeholder: "e.g., 0.1.x, or a commit SHA if testing main"
     validations:
       required: true
   - type: input
