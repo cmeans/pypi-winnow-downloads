@@ -11,6 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Verify CHANGELOG entry for tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! grep -qE "^## \[${VERSION}\] - " CHANGELOG.md; then
+            echo "::error::No CHANGELOG section found for v${VERSION}. Add a '## [${VERSION}] - YYYY-MM-DD' heading before tagging."
+            exit 1
+          fi
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
@@ -44,3 +52,55 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract CHANGELOG section for tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            found && /^## \[/ { exit }
+            found && /^\[[^]]+\]:[[:space:]]/ { exit }
+            $0 ~ "^## \\[" ver "\\] -" { found=1; next }
+            found { lines[++n] = $0 }
+            END {
+              start = 1
+              while (start <= n && lines[start] == "") start++
+              end = n
+              while (end >= start && lines[end] == "") end--
+              for (i = start; i <= end; i++) print lines[i]
+            }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "::error::Extracted empty release notes for v${VERSION} — CHANGELOG section is missing or empty."
+            exit 1
+          fi
+          echo "----- release notes preview -----"
+          cat release_notes.md
+          echo "----- end preview -----"
+
+      - name: Detect prerelease
+        id: prerelease
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE_FLAG: ${{ steps.prerelease.outputs.flag }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release_notes.md \
+            $PRERELEASE_FLAG
