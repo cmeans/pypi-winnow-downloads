@@ -797,6 +797,7 @@ def test_collect_writes_health_file_with_per_package_counts_and_timestamps(
                 "pdm": 0,
                 "pip-family": 142,
             },
+            "counts_by_system": {"Linux": 142, "Darwin": 0, "Windows": 0},
             "window_days": 30,
         }
     }
@@ -1424,3 +1425,71 @@ def test_collect_one_v0_2_0_files_unchanged_alongside_os_files(tmp_path: Path) -
     hero = json.loads((pkg_dir / "downloads-30d-non-ci.json").read_text())
     assert hero["message"] == "100"
     assert hero["label"] == "pip*/uv/poetry/pdm (30d)"
+
+
+def test_health_json_includes_counts_by_system(tmp_path: Path) -> None:
+    """v3: per-package successful entries gain counts_by_system alongside
+    the existing counts field."""
+    output_dir = tmp_path / "out"
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    stdout = _ok_rows(
+        [
+            {"ci": "False", "download_count": 100, "installer_name": "pip", "system_name": "Linux"},
+            {"ci": "False", "download_count": 30, "installer_name": "pip", "system_name": "Darwin"},
+        ]
+    )
+
+    def fake_runner(argv, env):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+    collect(config, runner=fake_runner)
+
+    health = json.loads((output_dir / "_health.json").read_text())
+    pkg_entry = health["packages"]["mypkg"]
+    assert pkg_entry["counts_by_system"] == {"Linux": 100, "Darwin": 30, "Windows": 0}
+
+
+def test_health_json_preserves_v0_2_0_fields(tmp_path: Path) -> None:
+    """v3 must not change existing _health.json fields for any given
+    pypinfo response. Asserts count, counts, window_days are all present
+    and have the expected v0.2.0 shape."""
+    output_dir = tmp_path / "out"
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+
+    stdout = _ok_rows(
+        [
+            {"ci": "False", "download_count": 100, "installer_name": "pip", "system_name": "Linux"},
+        ]
+    )
+
+    def fake_runner(argv, env):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+    collect(config, runner=fake_runner)
+
+    health = json.loads((output_dir / "_health.json").read_text())
+    pkg_entry = health["packages"]["mypkg"]
+    assert pkg_entry["count"] == 100
+    assert pkg_entry["window_days"] == 30
+    # Existing counts dict unchanged in v3.
+    assert pkg_entry["counts"]["pip"] == 100
+    assert "pip-family" in pkg_entry["counts"]

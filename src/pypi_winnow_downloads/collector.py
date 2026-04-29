@@ -440,6 +440,8 @@ def _write_health(
             entry: dict[str, Any] = {"count": o.count, "window_days": o.window_days}
             if o.counts is not None:
                 entry["counts"] = o.counts
+            if o.counts_by_system is not None:
+                entry["counts_by_system"] = o.counts_by_system
             packages_section[o.package] = entry
         else:
             packages_section[o.package] = {"error": o.error, "window_days": o.window_days}
