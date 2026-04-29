@@ -2,8 +2,10 @@ name: uv lock refresh
 
 # Weekly backstop for transitive dependency freshness. Runs uv lock
 # --upgrade and opens a PR if the resulting uv.lock differs from main.
-# Skips when a Dependabot or prior-cron PR is already open (avoid
-# overlapping PRs).
+# Skips when a `dependencies` + `python` labeled PR is already open
+# (Dependabot's pip-group PR or a prior cron PR) to avoid overlapping
+# PRs. Other Dependabot ecosystems (github-actions, docker) don't
+# share those labels and are not caught by the skip-gate.
 #
 # Pushes via a GitHub App installation token rather than
 # secrets.GITHUB_TOKEN because GITHUB_TOKEN-authored pushes do NOT
@@ -23,6 +25,13 @@ on:
   schedule:
     - cron: '0 12 * * 4'   # Thursday 12:00 UTC = 07:00 America/Chicago
   workflow_dispatch:
+
+# Serialize same-day runs (e.g., manual workflow_dispatch landing while
+# the scheduled run is mid-flight) to prevent two parallel jobs computing
+# the same dated branch and racing on push / PR create.
+concurrency:
+  group: uv-lock-refresh
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -81,8 +90,7 @@ jobs:
           else
             echo "uv.lock changed."
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff --stat uv.lock
-            git diff --stat uv.lock > /tmp/uv-lock-diff-stat.txt
+            git diff --stat uv.lock | tee /tmp/uv-lock-diff-stat.txt
           fi
 
       - name: Test gate — pytest against new lockfile
