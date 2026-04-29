@@ -38,7 +38,7 @@ Thursday is two days after Dependabot's Monday slot, giving the weekly Dependabo
 ## Job flow
 
 1. **Skip-gate — open dep PR.** Run `gh pr list --label dependencies --label python --state open --json number --jq 'length'`. If the count is non-zero, log a message and exit successfully (status 0). The query catches both Dependabot's pending weekly PR and any previous cron PR that hasn't merged yet. Either case is a reason to defer: don't open a second overlapping PR.
-2. **Checkout main.** Standard `actions/checkout@v4` with `ref: main`.
+2. **Checkout main.** `actions/checkout` SHA-pinned to match the SHA used in `dependabot-changelog.yml` (currently `de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2`), with `ref: main` and the App token.
 3. **Install uv.** `astral-sh/setup-uv@v7` (matches the rest of the repo's workflows: `ci.yml`, `publish.yml`, `test-publish.yml`). Caches uv's resolver index.
 4. **Run the upgrade.** `uv lock --upgrade`. This re-resolves within `pyproject.toml` ranges and updates `uv.lock` in place.
 5. **Diff-gate.** `git diff --quiet uv.lock`. Exit 0 if no changes — most weeks land here, no PR opened.
@@ -57,7 +57,7 @@ Thursday is two days after Dependabot's Monday slot, giving the weekly Dependabo
 
 **App token (`cmeans-claude-dev[bot]`) for the push, default `GITHUB_TOKEN` for the skip-gate query and uv tooling.**
 
-Pushes authenticated with `GITHUB_TOKEN` do NOT trigger downstream `pull_request` workflows (GitHub's anti-loop policy). The repo's main-branch ruleset requires `lint`, `typecheck`, `test`, and `version-sync` checks — pushes via `GITHUB_TOKEN` would leave those checks pending and block merge. The same constraint applies to `dependabot-changelog.yml`, which solves it the same way.
+Pushes authenticated with `GITHUB_TOKEN` do NOT trigger downstream `pull_request` workflows (GitHub's anti-loop policy). The repo's main-branch ruleset requires `lint`, `typecheck`, `test`, and `deploy-smoke` checks — pushes via `GITHUB_TOKEN` would leave those checks pending and block merge. The same constraint applies to `dependabot-changelog.yml`, which solves it the same way.
 
 Concretely:
 
@@ -82,7 +82,7 @@ The App token's installation grants the broader write permissions; the workflow-
 
 ## Loop guard
 
-Mirrors `dependabot-changelog.yml`'s discipline. The workflow only opens new PRs on `schedule` and `workflow_dispatch` triggers — neither fires on its own bot's pushes — so the loop guard from `dependabot-changelog.yml` (which runs on `pull_request_target` and could re-trigger on its own commits) is not strictly needed here. As a safety net the workflow also checks for an existing open `chore/uv-lock-refresh-*` branch with the current date suffix and exits 0 if found.
+The workflow only opens new PRs on `schedule` and `workflow_dispatch` triggers — neither fires on its own bot's pushes — so the loop guard from `dependabot-changelog.yml` (which runs on `pull_request_target` and could re-trigger on its own commits) is not strictly needed here. A `concurrency: group: uv-lock-refresh` declaration serializes same-day runs (e.g., a manual `workflow_dispatch` trigger landing while the scheduled run is mid-flight) so two parallel jobs never compute the same dated branch and race on push or PR-create.
 
 ## Coordination with existing automation
 
@@ -109,10 +109,11 @@ Zero dollars. `pypi-winnow-downloads` is a public repo, so GitHub Actions minute
 - The workflow runs on the cron schedule without manual intervention.
 - A Thursday run with Dependabot mid-cycle exits 0 and opens no PR.
 - A Thursday run with a clean main and fresh transitives produces a PR labeled `dependencies` + `python` + `Ready for QA`, with a `git diff --stat` summary in the body.
-- The PR's CHANGELOG entry is auto-added by the existing `dependabot-changelog.yml` workflow.
+- The PR's CHANGELOG entry is added inline by the workflow itself (under `## [Unreleased]` → `### Changed`). The existing `dependabot-changelog.yml` is author-gated to `dependabot[bot]` and does not fire on this cron's PRs, so the cron uses its own copy of the same KaC-aware insertion logic.
 - A test failure against the new lockfile prevents the PR from opening.
 
 ## Implementation file list
 
 - Create: `.github/workflows/uv-lock-refresh.yml` — the workflow itself.
-- No modifications to existing workflows. No changes to `pyproject.toml`, `uv.lock`, `CHANGELOG.md` (CHANGELOG entry comes from the workflow's auto-CHANGELOG handling once the PR is opened, not from this PR).
+- Modify: `CHANGELOG.md` — one bullet under `## [Unreleased]` → `### Added` announcing the new workflow (per project's per-PR CHANGELOG rule). Distinct from the runtime CHANGELOG bullets the workflow inserts into future PRs (those land under `### Changed`).
+- No changes to `pyproject.toml`, `uv.lock`, or other existing workflows.

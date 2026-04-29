@@ -69,7 +69,7 @@ name: uv lock refresh
 # secrets.GITHUB_TOKEN because GITHUB_TOKEN-authored pushes do NOT
 # trigger downstream pull_request workflows (GitHub anti-loop policy),
 # which would leave required CI checks (lint, typecheck, test,
-# version-sync) unsatisfied and block merge under the repo's
+# deploy-smoke) unsatisfied and block merge under the repo's
 # main-branch ruleset. Same constraint and same fix as
 # .github/workflows/dependabot-changelog.yml.
 #
@@ -336,7 +336,7 @@ with:
 
 ### Added
 
-- **`.github/workflows/uv-lock-refresh.yml`** new scheduled workflow runs `uv lock --upgrade` every Thursday 12:00 UTC as a backstop for transitive dependency freshness — picks up minor/patch bumps that Dependabot's advisory- and cascade-driven flow hasn't yet surfaced. Skip-gate defers the run if a `dependencies` + `python`-labeled PR is already open (Dependabot mid-cycle or prior cron PR pending QA), so PRs don't overlap. Test gate (`uv sync --frozen --extra dev && uv run pytest`) blocks PR creation if the new lockfile breaks the suite. PR is opened via the existing `cmeans-claude-dev[bot]` App token (same path as `dependabot-changelog.yml`) so downstream CI checks (lint, typecheck, test, version-sync) fire on the bot's push and don't leave the merge gate stuck. Most weeks: no PR (Dependabot already covered transitives via cascade). Spec: `docs/superpowers/specs/2026-04-29-uv-lock-refresh-cron-design.md`.
+- **`.github/workflows/uv-lock-refresh.yml`** new scheduled workflow runs `uv lock --upgrade` every Thursday 12:00 UTC as a backstop for transitive dependency freshness — picks up minor/patch bumps that Dependabot's advisory- and cascade-driven flow hasn't yet surfaced. Skip-gate defers the run if a `dependencies` + `python`-labeled PR is already open (Dependabot mid-cycle or prior cron PR pending QA), so PRs don't overlap. Test gate (`uv sync --frozen --extra dev && uv run pytest`) blocks PR creation if the new lockfile breaks the suite. PR is opened via the existing `cmeans-claude-dev[bot]` App token (same path as `dependabot-changelog.yml`) so downstream CI checks (lint, typecheck, test, deploy-smoke) fire on the bot's push and don't leave the merge gate stuck. Most weeks: no PR (Dependabot already covered transitives via cascade). Spec: `docs/superpowers/specs/2026-04-29-uv-lock-refresh-cron-design.md`.
 
 ### Changed
 ```
@@ -435,7 +435,7 @@ Zero. Public repo → unlimited GitHub Actions minutes. ~30s/week when no diff, 
 
 - [ ] `yamllint .github/workflows/uv-lock-refresh.yml` clean (verified locally).
 - [ ] `actionlint .github/workflows/uv-lock-refresh.yml` clean (verified locally).
-- [ ] CI green on this PR's CI run (lint, typecheck, test, version-sync).
+- [ ] CI green on this PR's CI run (lint, typecheck, test, deploy-smoke).
 - [ ] After merge: manual `workflow_dispatch` to verify end-to-end behavior in at least one mode (skip-gate triggered if a Dependabot PR is open, or normal flow if not).
 
 ## Spec
