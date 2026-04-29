@@ -634,7 +634,103 @@ def test_collect_writes_health_file_with_per_package_counts_and_timestamps(
     health = json.loads(health_path.read_text())
     assert health["started"] == fixed_start.isoformat()
     assert health["finished"] == fixed_end.isoformat()
-    assert health["packages"] == {"mcp-clipboard": {"count": 142, "window_days": 30}}
+    assert health["packages"] == {
+        "mcp-clipboard": {
+            "count": 142,
+            "counts": {
+                "pip": 142,
+                "pipenv": 0,
+                "pipx": 0,
+                "uv": 0,
+                "poetry": 0,
+                "pdm": 0,
+                "pip-family": 142,
+            },
+            "window_days": 30,
+        }
+    }
+
+
+def test_health_file_includes_per_installer_counts_map(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    health = json.loads((output_dir / "_health.json").read_text())
+    pkg_entry = health["packages"]["mypkg"]
+    assert pkg_entry["counts"] == {
+        "pip": 50,
+        "pipenv": 1,
+        "pipx": 2,
+        "uv": 60,
+        "poetry": 11,
+        "pdm": 3,
+        "pip-family": 53,
+    }
+
+
+def test_health_file_top_level_count_preserved(tmp_path: Path) -> None:
+    """Backcompat: anything reading _health.json's per-package `count`
+    field today (monitoring, scripts, the live CT 112 deploy) must keep
+    seeing the v1 hero total — sum of all six allowlisted installers.
+    The new `counts` map is purely additive."""
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    health = json.loads((output_dir / "_health.json").read_text())
+    assert health["packages"]["mypkg"]["count"] == 127  # 50 + 1 + 2 + 60 + 11 + 3
+    assert health["packages"]["mypkg"]["window_days"] == 30
 
 
 def test_collect_continues_past_single_package_failure(tmp_path: Path) -> None:

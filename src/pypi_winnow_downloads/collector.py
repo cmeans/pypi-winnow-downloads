@@ -388,7 +388,10 @@ def _write_health(
     packages_section: dict[str, dict[str, Any]] = {}
     for o in outcomes:
         if o.ok:
-            packages_section[o.package] = {"count": o.count, "window_days": o.window_days}
+            entry: dict[str, Any] = {"count": o.count, "window_days": o.window_days}
+            if o.counts is not None:
+                entry["counts"] = o.counts
+            packages_section[o.package] = entry
         else:
             packages_section[o.package] = {"error": o.error, "window_days": o.window_days}
 
