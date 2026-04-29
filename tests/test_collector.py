@@ -715,9 +715,18 @@ def _fake_runner_for(counts_by_package: dict[str, int]):
         non_ci_count = counts_by_package.get(pkg, 0)
         stdout = json.dumps(
             {
+                # system_name on the non-CI row keeps the per-OS aggregates
+                # non-zero in integration tests, so OS-badge writes have realistic
+                # values (otherwise by_system would be all zeros and exercise only
+                # the lightgrey color path).
                 "rows": [
                     {"ci": "True", "download_count": 10_000, "installer_name": "pip"},
-                    {"ci": "False", "download_count": non_ci_count, "installer_name": "pip"},
+                    {
+                        "ci": "False",
+                        "download_count": non_ci_count,
+                        "installer_name": "pip",
+                        "system_name": "Linux",
+                    },
                 ],
                 "query": {},
             }
