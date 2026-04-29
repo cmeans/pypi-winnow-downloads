@@ -6,6 +6,12 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/cmeans/pypi-winnow-downloads/ci.yml?label=CI)](https://github.com/cmeans/pypi-winnow-downloads/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/cmeans/pypi-winnow-downloads/graph/badge.svg)](https://codecov.io/gh/cmeans/pypi-winnow-downloads)
 [![pip*/uv/poetry/pdm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![pip downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pip-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![pipenv downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pipenv-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![pipx downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pipx-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![uv downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-uv-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![poetry downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-poetry-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![pdm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pdm-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
 
 Self-hosted PyPI download badge service that winnows CI traffic out of download
 counts. Produces [shields.io](https://shields.io/badges/endpoint-badge)-compatible endpoint
@@ -74,6 +80,45 @@ winnow-collect --config /path/to/config.yaml
 
 To deploy as a daily systemd timer plus a Caddy HTTPS service serving the
 output directory, see
+[`deploy/README.md`](https://github.com/cmeans/pypi-winnow-downloads/blob/main/deploy/README.md).
+
+## Use this service for your own package
+
+The reference deployment at `pypi-badges.intfar.com` produces eight badge
+JSON files per configured package per window, all under
+`https://pypi-badges.intfar.com/<package>/`:
+
+| File | Label | What it counts |
+|---|---|---|
+| `downloads-30d-non-ci.json` | `pip*/uv/poetry/pdm (30d)` | All six allowlisted installers summed (the v1 hero) |
+| `installer-pip-30d-non-ci.json` | `pip (30d)` | `pip` only |
+| `installer-pipenv-30d-non-ci.json` | `pipenv (30d)` | `pipenv` only |
+| `installer-pipx-30d-non-ci.json` | `pipx (30d)` | `pipx` only |
+| `installer-uv-30d-non-ci.json` | `uv (30d)` | `uv` only |
+| `installer-poetry-30d-non-ci.json` | `poetry (30d)` | `poetry` only |
+| `installer-pdm-30d-non-ci.json` | `pdm (30d)` | `pdm` only |
+| `installer-pip-family-30d-non-ci.json` | `pip* (30d)` | `pip + pipenv + pipx` aggregate |
+
+All files exclude CI traffic (BigQuery's `details.ci != True`). Each is a
+[shields.io endpoint badge](https://shields.io/badges/endpoint-badge) JSON.
+
+To embed any of these in your own README, wrap the file URL in shields.io's
+`/endpoint?url=` form, URL-encoding the inner URL (`/` becomes `%2F`, `:`
+becomes `%3A`):
+
+```markdown
+[![pip downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2F<your-package>%2Finstaller-pip-30d-non-ci.json)](https://pypi.org/project/<your-package>/)
+```
+
+Replace `<your-package>` with your PyPI package name. The same template
+works for any of the eight files — substitute the filename. The window
+length (`30d` in the examples) reflects the reference deployment's
+`window_days: 30` setting; if you self-host, your own deployment's
+`window_days` substitutes here.
+
+To get your package added to the reference deployment's `config.yaml`,
+[open an issue](https://github.com/cmeans/pypi-winnow-downloads/issues/new)
+or run your own collector — see
 [`deploy/README.md`](https://github.com/cmeans/pypi-winnow-downloads/blob/main/deploy/README.md).
 
 ## Status
