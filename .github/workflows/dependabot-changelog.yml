@@ -12,7 +12,7 @@ name: Dependabot CHANGELOG
 # than secrets.GITHUB_TOKEN. Pushes authenticated with GITHUB_TOKEN
 # do NOT trigger downstream `pull_request` workflows (GitHub's
 # anti-loop policy), which would leave required status checks
-# (lint, typecheck, test, version-sync) unsatisfied on the bot's
+# (lint, typecheck, test, deploy-smoke) unsatisfied on the bot's
 # follow-up commit and block merge under the repo's main-branch
 # ruleset. App-token-authored pushes do trigger those workflows
 # normally.
