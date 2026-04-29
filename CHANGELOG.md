@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`.gitignore`** ignores a private operator-tooling directory `.deploy/` at the repo root so maintainer-specific deploy scripts and design docs stay out of public history. The directory holds tooling like `update-collector.sh` (drives the CT 112 deployment via `WINNOW_REMOTE_RUN`) plus matching design / plan documents — parameterized in principle but maintainer-shaped in practice (SSH-to-Holodeck, `pct exec`, journald awareness). Other self-hosters can use plain `uv pip install --upgrade pypi-winnow-downloads`; this tooling does not need a public contract or maintenance burden. Rule is unanchored (`.deploy/`) to match the convention of the rest of the file (`.venv/`, `dist/`, `__pycache__/` etc. are all unanchored). Internal-only; no user-facing behavior change.
+
 ## [0.2.0] - 2026-04-29
 
 ### Added
