@@ -26,6 +26,21 @@ _BADGE_LABEL_TEMPLATE = "pip*/uv/poetry/pdm ({days}d)"
 _BADGE_FILENAME_TEMPLATE = "downloads-{days}d-non-ci.json"
 _HEALTH_FILENAME = "_health.json"
 
+# Per-installer badge specs: (filename_template, label_template, counts_key).
+# `counts_key` looks up the value in the per-installer dict that
+# `_collect_one` builds. The "pip-family" entry is computed by `_collect_one`
+# (sum of pip + pipenv + pipx) and added to the dict before iteration. Order
+# matches the README dogfood layout.
+_INSTALLER_BADGE_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("installer-pip-{days}d-non-ci.json", "pip ({days}d)", "pip"),
+    ("installer-pipenv-{days}d-non-ci.json", "pipenv ({days}d)", "pipenv"),
+    ("installer-pipx-{days}d-non-ci.json", "pipx ({days}d)", "pipx"),
+    ("installer-uv-{days}d-non-ci.json", "uv ({days}d)", "uv"),
+    ("installer-poetry-{days}d-non-ci.json", "poetry ({days}d)", "poetry"),
+    ("installer-pdm-{days}d-non-ci.json", "pdm ({days}d)", "pdm"),
+    ("installer-pip-family-{days}d-non-ci.json", "pip* ({days}d)", "pip-family"),
+)
+
 # Installer allowlist for the hero metric. We only count downloads whose
 # `details.installer.name` is one of the interactive Python packaging
 # tools — the population that approximates "real developers installing
@@ -250,26 +265,47 @@ def _collect_one(
     runner: Runner,
 ) -> PackageOutcome:
     try:
-        counts = run_pypinfo(
+        per_installer = run_pypinfo(
             pkg.name,
             pkg.window_days,
             credential_file=config.service.credential_file,
             runner=runner,
         )
-        # Sum per-installer counts to produce the hero badge total. The v1
-        # hero badge combines all six allowlisted installers into a single
-        # number; per-installer breakdown badges are handled separately in
-        # subsequent steps.
-        count = sum(counts.values())
-        badge_path = (
+        # Compute the v1 hero total + the pip-family aggregate. Build a single
+        # dict so the per-installer badge writer below can do a uniform lookup.
+        hero_total = sum(per_installer.values())
+        counts: dict[str, int] = {
+            **per_installer,
+            "pip-family": (per_installer["pip"] + per_installer["pipenv"] + per_installer["pipx"]),
+        }
+
+        # v1 hero badge — kept verbatim for backwards compatibility with any
+        # README, monitoring, or automation that reads downloads-<N>d-non-ci.json.
+        hero_path = (
             config.service.output_dir
             / pkg.name
             / _BADGE_FILENAME_TEMPLATE.format(days=pkg.window_days)
         )
-        payload = badge.build_payload(
-            count=count, label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days)
+        badge.write_badge(
+            path=hero_path,
+            payload=badge.build_payload(
+                count=hero_total,
+                label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days),
+            ),
         )
-        badge.write_badge(path=badge_path, payload=payload)
+
+        # Per-installer badges (six individual + pip-family aggregate).
+        for fname_tpl, label_tpl, key in _INSTALLER_BADGE_SPECS:
+            installer_path = (
+                config.service.output_dir / pkg.name / fname_tpl.format(days=pkg.window_days)
+            )
+            badge.write_badge(
+                path=installer_path,
+                payload=badge.build_payload(
+                    count=counts[key],
+                    label=label_tpl.format(days=pkg.window_days),
+                ),
+            )
     except (CollectorError, OSError) as e:
         # Per-package isolation: a single package's BigQuery failure or disk
         # write failure must not abort the whole run, and must not skip the
@@ -280,8 +316,19 @@ def _collect_one(
             package=pkg.name, window_days=pkg.window_days, count=None, error=str(e)
         )
 
-    logger.info("collector: wrote badge for %s (count=%d, path=%s)", pkg.name, count, badge_path)
-    return PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count)
+    logger.info(
+        "collector: wrote %d badges for %s (hero count=%d, path=%s)",
+        1 + len(_INSTALLER_BADGE_SPECS),
+        pkg.name,
+        hero_total,
+        hero_path.parent,
+    )
+    return PackageOutcome(
+        package=pkg.name,
+        window_days=pkg.window_days,
+        count=hero_total,
+        counts=counts,
+    )
 
 
 def _check_staleness(
