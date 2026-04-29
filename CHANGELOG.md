@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-28
+
 ### Added
 
 - **`.github/workflows/publish.yml`** gains a `release` job that auto-creates a GitHub release page for every `v*` tag, with the release body extracted from the matching `## [X.Y.Z] - YYYY-MM-DD` section in `CHANGELOG.md`. The job runs after `publish` succeeds, so the release page appears only when the PyPI upload also lands. The `build` job extracts the section via a small `awk` script (reads from the matching `## [` heading until the next `## [` or `[link-ref]:` line, then trims leading and trailing blank lines) and fails the workflow before PyPI upload if the extracted body is empty — covering both the missing-section case and the heading-only case (a `## [X.Y.Z] -` line with no body underneath would otherwise pass a name-only presence check, ship to PyPI, and then leave the release job to fail with no PyPI rollback). The extracted `release_notes.md` rides through the workflow as an artifact so the same algorithm gates both ends, with no duplicated logic. Locally validated against v0.1.0 / v0.1.1 / v0.1.2. Pre-release tags (anything containing `-`, e.g., `v1.0.0-rc1`) get the `--prerelease` flag; stable tags rely on `gh release create`'s `--latest=auto` semver behavior. The job uses the workflow-default `GITHUB_TOKEN` with `permissions: contents: write` (no separate App token required). Backfilled v0.1.0 / v0.1.1 / v0.1.2 release pages remain in place; this only affects future tags.
@@ -274,7 +276,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collector finds pypinfo via `sys.executable`'s neighbor instead of
   PATH.
 
-[Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/cmeans/pypi-winnow-downloads/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/cmeans/pypi-winnow-downloads/releases/tag/v0.1.0
