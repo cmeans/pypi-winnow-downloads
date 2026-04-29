@@ -26,6 +26,21 @@ _BADGE_LABEL_TEMPLATE = "pip*/uv/poetry/pdm ({days}d)"
 _BADGE_FILENAME_TEMPLATE = "downloads-{days}d-non-ci.json"
 _HEALTH_FILENAME = "_health.json"
 
+# Per-installer badge specs: (filename_template, label_template, counts_key).
+# `counts_key` looks up the value in the per-installer dict that
+# `_collect_one` builds. The "pip-family" entry is computed by `_collect_one`
+# (sum of pip + pipenv + pipx) and added to the dict before iteration. Order
+# matches the README dogfood layout.
+_INSTALLER_BADGE_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("installer-pip-{days}d-non-ci.json", "pip ({days}d)", "pip"),
+    ("installer-pipenv-{days}d-non-ci.json", "pipenv ({days}d)", "pipenv"),
+    ("installer-pipx-{days}d-non-ci.json", "pipx ({days}d)", "pipx"),
+    ("installer-uv-{days}d-non-ci.json", "uv ({days}d)", "uv"),
+    ("installer-poetry-{days}d-non-ci.json", "poetry ({days}d)", "poetry"),
+    ("installer-pdm-{days}d-non-ci.json", "pdm ({days}d)", "pdm"),
+    ("installer-pip-family-{days}d-non-ci.json", "pip* ({days}d)", "pip-family"),
+)
+
 # Installer allowlist for the hero metric. We only count downloads whose
 # `details.installer.name` is one of the interactive Python packaging
 # tools — the population that approximates "real developers installing
@@ -39,7 +54,11 @@ _HEALTH_FILENAME = "_health.json"
 # BigQuery schema records, which for these tools is lowercase. A
 # capitalized variant ("Pip", "PIP") indicates a different category
 # (some other UA reusing the name) and is correctly excluded.
-_INSTALLER_ALLOWLIST = frozenset({"pip", "uv", "poetry", "pdm", "pipenv", "pipx"})
+# Ordering matters: dicts returned by run_pypinfo iterate in this order, which
+# the per-installer badge writer relies on for deterministic output and tests
+# assert against. Allowlist keeps the same membership; tuple gives us order.
+_INSTALLER_NAMES: tuple[str, ...] = ("pip", "pipenv", "pipx", "uv", "poetry", "pdm")
+_INSTALLER_ALLOWLIST: frozenset[str] = frozenset(_INSTALLER_NAMES)
 # pypinfo's own --timeout default is 120s. Pad to 180s so the BigQuery
 # call has its own budget plus startup/teardown overhead before our outer
 # subprocess.run() abort kicks in. A subprocess hang here would otherwise
@@ -73,6 +92,7 @@ class PackageOutcome:
     package: str
     window_days: int
     count: int | None
+    counts: dict[str, int] | None = None
     error: str | None = None
 
     @property
@@ -113,7 +133,7 @@ def run_pypinfo(
     *,
     credential_file: Path,
     runner: Runner = _default_runner,
-) -> int:
+) -> dict[str, int]:
     # Note: do NOT pass `-a/--auth <path>` on argv. pypinfo (cli.py:130-133)
     # short-circuits to a credential-setter path when --auth is present and
     # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
@@ -163,7 +183,12 @@ def run_pypinfo(
     if not isinstance(rows, list):
         raise CollectorError(f"pypinfo output missing 'rows' list for {package!r}")
 
-    total = 0
+    # Initialize counts to 0 for every allowlisted installer so the returned
+    # dict shape is stable regardless of which installers had rows in this
+    # window. Order follows _INSTALLER_NAMES so callers can rely on iteration
+    # order for badge filenames and tests can assert on equality with a
+    # specific dict literal.
+    counts: dict[str, int] = {name: 0 for name in _INSTALLER_NAMES}
     for row in rows:
         if not isinstance(row, dict):
             raise CollectorError(
@@ -183,15 +208,16 @@ def run_pypinfo(
             raise CollectorError(
                 f"pypinfo row for {package!r} missing 'installer_name' field: {row!r}"
             )
-        if row["installer_name"] not in _INSTALLER_ALLOWLIST:
+        installer = row["installer_name"]
+        if installer not in _INSTALLER_ALLOWLIST:
             continue
         count = row.get("download_count", 0)
         if not isinstance(count, int):
             raise CollectorError(
                 f"pypinfo row for {package!r} has non-integer download_count: {count!r}"
             )
-        total += count
-    return total
+        counts[installer] += count
+    return counts
 
 
 def collect(
@@ -239,21 +265,47 @@ def _collect_one(
     runner: Runner,
 ) -> PackageOutcome:
     try:
-        count = run_pypinfo(
+        per_installer = run_pypinfo(
             pkg.name,
             pkg.window_days,
             credential_file=config.service.credential_file,
             runner=runner,
         )
-        badge_path = (
+        # Compute the v1 hero total + the pip-family aggregate. Build a single
+        # dict so the per-installer badge writer below can do a uniform lookup.
+        hero_total = sum(per_installer.values())
+        counts: dict[str, int] = {
+            **per_installer,
+            "pip-family": (per_installer["pip"] + per_installer["pipenv"] + per_installer["pipx"]),
+        }
+
+        # v1 hero badge — kept verbatim for backwards compatibility with any
+        # README, monitoring, or automation that reads downloads-<N>d-non-ci.json.
+        hero_path = (
             config.service.output_dir
             / pkg.name
             / _BADGE_FILENAME_TEMPLATE.format(days=pkg.window_days)
         )
-        payload = badge.build_payload(
-            count=count, label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days)
+        badge.write_badge(
+            path=hero_path,
+            payload=badge.build_payload(
+                count=hero_total,
+                label=_BADGE_LABEL_TEMPLATE.format(days=pkg.window_days),
+            ),
         )
-        badge.write_badge(path=badge_path, payload=payload)
+
+        # Per-installer badges (six individual + pip-family aggregate).
+        for fname_tpl, label_tpl, key in _INSTALLER_BADGE_SPECS:
+            installer_path = (
+                config.service.output_dir / pkg.name / fname_tpl.format(days=pkg.window_days)
+            )
+            badge.write_badge(
+                path=installer_path,
+                payload=badge.build_payload(
+                    count=counts[key],
+                    label=label_tpl.format(days=pkg.window_days),
+                ),
+            )
     except (CollectorError, OSError) as e:
         # Per-package isolation: a single package's BigQuery failure or disk
         # write failure must not abort the whole run, and must not skip the
@@ -264,8 +316,19 @@ def _collect_one(
             package=pkg.name, window_days=pkg.window_days, count=None, error=str(e)
         )
 
-    logger.info("collector: wrote badge for %s (count=%d, path=%s)", pkg.name, count, badge_path)
-    return PackageOutcome(package=pkg.name, window_days=pkg.window_days, count=count)
+    logger.info(
+        "collector: wrote %d badges for %s (hero count=%d, path=%s)",
+        1 + len(_INSTALLER_BADGE_SPECS),
+        pkg.name,
+        hero_total,
+        hero_path.parent,
+    )
+    return PackageOutcome(
+        package=pkg.name,
+        window_days=pkg.window_days,
+        count=hero_total,
+        counts=counts,
+    )
 
 
 def _check_staleness(
@@ -325,7 +388,10 @@ def _write_health(
     packages_section: dict[str, dict[str, Any]] = {}
     for o in outcomes:
         if o.ok:
-            packages_section[o.package] = {"count": o.count, "window_days": o.window_days}
+            entry: dict[str, Any] = {"count": o.count, "window_days": o.window_days}
+            if o.counts is not None:
+                entry["counts"] = o.counts
+            packages_section[o.package] = entry
         else:
             packages_section[o.package] = {"error": o.error, "window_days": o.window_days}
 

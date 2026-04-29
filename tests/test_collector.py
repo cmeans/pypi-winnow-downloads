@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import textwrap
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 from pypi_winnow_downloads import collector as collector_module
 from pypi_winnow_downloads.collector import (
     CollectorError,
+    PackageOutcome,
     _resolve_pypinfo_path,
     collect,
     run_pypinfo,
@@ -135,9 +137,9 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("realpkg", 30, credential_file=creds)
+    result = run_pypinfo("realpkg", 30, credential_file=creds)
 
-    assert count == 11, "default runner did not actually execute the subprocess"
+    assert sum(result.values()) == 11, "default runner did not actually execute the subprocess"
     observed_env, observed_argv = obs_file.read_text().splitlines()
     assert observed_env == str(creds), "GOOGLE_APPLICATION_CREDENTIALS did not reach child"
     argv_parts = observed_argv.split(",")
@@ -212,9 +214,9 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
     expected_creds = tmp_path / "expected-creds.json"
     expected_creds.write_text("{}")
 
-    count = run_pypinfo("pkg", 30, credential_file=expected_creds)
+    result = run_pypinfo("pkg", 30, credential_file=expected_creds)
 
-    assert count == 1
+    assert sum(result.values()) == 1
     assert obs_creds.read_text() == str(expected_creds), (
         "pypinfo's persisted db.json took priority over GOOGLE_APPLICATION_CREDENTIALS — "
         "XDG_DATA_HOME isolation in run_pypinfo is missing or broken"
@@ -239,9 +241,9 @@ def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> No
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 95
+    assert sum(result.values()) == 95
 
 
 def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> None:
@@ -281,9 +283,55 @@ def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> N
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 80, "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
+    assert sum(result.values()) == 80, (
+        "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
+    )
+
+
+def test_run_pypinfo_returns_per_installer_dict(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+        # bandersnatch is a mirror tool; not in allowlist — excluded
+        {"installer_name": "bandersnatch", "ci": "False", "download_count": 999},
+        {"installer_name": "pip", "ci": "True", "download_count": 1000},  # excluded by CI filter
+    ]
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert result == {"pip": 50, "pipenv": 1, "pipx": 2, "uv": 60, "poetry": 11, "pdm": 3}
+
+
+def test_run_pypinfo_zeroes_installers_with_no_rows(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 100},
+    ]
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    result = run_pypinfo("solopkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert result == {"pip": 100, "pipenv": 0, "pipx": 0, "uv": 0, "poetry": 0, "pdm": 0}
 
 
 def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> None:
@@ -312,9 +360,10 @@ def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> N
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 63  # 1+2+4+8+16+32
+    assert sum(result.values()) == 63  # 1+2+4+8+16+32
+    assert all(result[name] > 0 for name in ("pip", "pipenv", "pipx", "uv", "poetry", "pdm"))
 
 
 def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
@@ -341,9 +390,9 @@ def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 100, "case-mismatched variants must be excluded"
+    assert sum(result.values()) == 100, "case-mismatched variants must be excluded"
 
 
 def test_run_pypinfo_raises_on_missing_installer_name_field(tmp_path: Path) -> None:
@@ -377,9 +426,9 @@ def test_run_pypinfo_returns_zero_when_rows_empty(tmp_path: Path) -> None:
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("newpkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("newpkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 0
+    assert sum(result.values()) == 0
 
 
 def test_run_pypinfo_raises_on_nonzero_exit(tmp_path: Path) -> None:
@@ -476,6 +525,33 @@ def test_run_pypinfo_raises_on_subprocess_timeout(tmp_path: Path) -> None:
         run_pypinfo("mypkg", 30, credential_file=creds, runner=slow_runner)
 
 
+# --- PackageOutcome dataclass ---
+
+
+def test_package_outcome_carries_per_installer_counts() -> None:
+    counts_dict = {
+        "pip": 50,
+        "pipenv": 1,
+        "pipx": 2,
+        "uv": 30,
+        "poetry": 11,
+        "pdm": 6,
+        "pip-family": 53,
+    }
+    outcome = PackageOutcome(
+        package="foo",
+        window_days=30,
+        count=100,
+        counts=counts_dict,
+    )
+    assert outcome.counts == counts_dict
+    assert outcome.count == 100  # backwards-compat field unchanged
+
+    # Default for failure path: no counts.
+    failed = PackageOutcome(package="bar", window_days=30, count=None, error="boom")
+    assert failed.counts is None
+
+
 # --- collect() orchestration ---
 
 
@@ -558,7 +634,103 @@ def test_collect_writes_health_file_with_per_package_counts_and_timestamps(
     health = json.loads(health_path.read_text())
     assert health["started"] == fixed_start.isoformat()
     assert health["finished"] == fixed_end.isoformat()
-    assert health["packages"] == {"mcp-clipboard": {"count": 142, "window_days": 30}}
+    assert health["packages"] == {
+        "mcp-clipboard": {
+            "count": 142,
+            "counts": {
+                "pip": 142,
+                "pipenv": 0,
+                "pipx": 0,
+                "uv": 0,
+                "poetry": 0,
+                "pdm": 0,
+                "pip-family": 142,
+            },
+            "window_days": 30,
+        }
+    }
+
+
+def test_health_file_includes_per_installer_counts_map(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    health = json.loads((output_dir / "_health.json").read_text())
+    pkg_entry = health["packages"]["mypkg"]
+    assert pkg_entry["counts"] == {
+        "pip": 50,
+        "pipenv": 1,
+        "pipx": 2,
+        "uv": 60,
+        "poetry": 11,
+        "pdm": 3,
+        "pip-family": 53,
+    }
+
+
+def test_health_file_top_level_count_preserved(tmp_path: Path) -> None:
+    """Backcompat: anything reading _health.json's per-package `count`
+    field today (monitoring, scripts, the live CT 112 deploy) must keep
+    seeing the v1 hero total — sum of all six allowlisted installers.
+    The new `counts` map is purely additive."""
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    health = json.loads((output_dir / "_health.json").read_text())
+    assert health["packages"]["mypkg"]["count"] == 127  # 50 + 1 + 2 + 60 + 11 + 3
+    assert health["packages"]["mypkg"]["window_days"] == 30
 
 
 def test_collect_continues_past_single_package_failure(tmp_path: Path) -> None:
@@ -716,6 +888,128 @@ def _seed_previous_health(output_dir: Path, finished: datetime) -> None:
         "packages": {},
     }
     (output_dir / "_health.json").write_text(json.dumps(payload))
+
+
+def test_collect_writes_eight_files_per_successful_package(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    pkg_dir = output_dir / "mypkg"
+    expected = {
+        "downloads-30d-non-ci.json",
+        "installer-pip-30d-non-ci.json",
+        "installer-pipenv-30d-non-ci.json",
+        "installer-pipx-30d-non-ci.json",
+        "installer-uv-30d-non-ci.json",
+        "installer-poetry-30d-non-ci.json",
+        "installer-pdm-30d-non-ci.json",
+        "installer-pip-family-30d-non-ci.json",
+    }
+    assert {p.name for p in pkg_dir.iterdir()} == expected
+
+
+def test_collect_pip_family_aggregate_equals_pip_plus_pipenv_plus_pipx(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    family_path = output_dir / "mypkg" / "installer-pip-family-30d-non-ci.json"
+    payload = json.loads(family_path.read_text())
+    # 50 + 1 + 2 = 53; format_count emits the integer as-is for small numbers.
+    assert payload["message"] == "53"
+    assert payload["label"] == "pip* (30d)"
+
+
+def test_collect_v1_hero_count_unchanged_against_pre_v2_fixture(tmp_path: Path) -> None:
+    """Regression: the v1 hero badge value for a given pypinfo response must
+    equal sum(per-installer counts), preserving the contract that pre-v2
+    consumers of `downloads-<N>d-non-ci.json` rely on."""
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+        # Excluded from hero by design — these must not contribute.
+        {"installer_name": "bandersnatch", "ci": "False", "download_count": 999},
+        {"installer_name": "pip", "ci": "True", "download_count": 1000},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    hero_path = output_dir / "mypkg" / "downloads-30d-non-ci.json"
+    payload = json.loads(hero_path.read_text())
+    # 50 + 1 + 2 + 60 + 11 + 3 = 127; format_count emits "127" for small numbers.
+    assert payload["message"] == "127"
+    assert payload["label"] == "pip*/uv/poetry/pdm (30d)"
 
 
 def test_collect_staleness_warning_fires_when_previous_run_too_old(
