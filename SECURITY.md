@@ -41,8 +41,9 @@ a private channel.
 - Your operating system and Python version (subprocess + path-handling
   behavior is OS-dependent, even though the project targets Linux for
   deployment).
-- Whether the issue is reproducible against a clean
-  `pip install pypi-winnow-downloads`, against a reference deploy
+- Whether the issue is reproducible against a clean install
+  (`uv tool install pypi-winnow-downloads` or
+  `pip install pypi-winnow-downloads`), against a reference deploy
   (systemd / Docker), or only in a custom environment.
 
 ## What to expect

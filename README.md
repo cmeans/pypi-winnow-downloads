@@ -19,10 +19,6 @@ any existing alternative for small or young Python packages.
 > Both views track the same `pypi-winnow-downloads` package over a 30-day non-CI
 > window.
 
-**Total** (30d, non-CI):
-
-[![pip*/uv/poetry/pdm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
-
 **By installer** (30d, non-CI):
 
 [![pip downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pip-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
