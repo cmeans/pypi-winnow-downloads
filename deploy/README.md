@@ -53,12 +53,17 @@ Files:
 Quick start (Debian-family; adjust as needed):
 
 ```bash
-# Install the package. Recommended: an isolated venv at /opt/ so the
-# package + its runtime deps don't fight host system Python packaging.
-sudo python3 -m venv /opt/pypi-winnow-downloads
-sudo /opt/pypi-winnow-downloads/bin/pip install pypi-winnow-downloads
+# Install the package into an isolated venv at /opt/ so the package + its
+# runtime deps don't fight host system Python packaging. `uv venv` creates
+# the venv; `uv pip install --python <path>` installs into a specific venv
+# without needing to activate it. If you don't have uv, swap these two
+# commands for `python3 -m venv` and `<venv>/bin/pip install` — same
+# result, slower install.
+sudo uv venv /opt/pypi-winnow-downloads
+sudo uv pip install --python /opt/pypi-winnow-downloads/bin/python pypi-winnow-downloads
 # or, from a local wheel:
-# sudo /opt/pypi-winnow-downloads/bin/pip install dist/pypi_winnow_downloads-<version>-py3-none-any.whl
+# sudo uv pip install --python /opt/pypi-winnow-downloads/bin/python \
+#     dist/pypi_winnow_downloads-<version>-py3-none-any.whl
 
 # Symlink the CLI entry point onto the system PATH so the systemd unit's
 # ExecStart=/usr/local/bin/winnow-collect resolves. The collector finds
