@@ -39,7 +39,11 @@ _HEALTH_FILENAME = "_health.json"
 # BigQuery schema records, which for these tools is lowercase. A
 # capitalized variant ("Pip", "PIP") indicates a different category
 # (some other UA reusing the name) and is correctly excluded.
-_INSTALLER_ALLOWLIST = frozenset({"pip", "uv", "poetry", "pdm", "pipenv", "pipx"})
+# Ordering matters: dicts returned by run_pypinfo iterate in this order, which
+# the per-installer badge writer relies on for deterministic output and tests
+# assert against. Allowlist keeps the same membership; tuple gives us order.
+_INSTALLER_NAMES: tuple[str, ...] = ("pip", "pipenv", "pipx", "uv", "poetry", "pdm")
+_INSTALLER_ALLOWLIST: frozenset[str] = frozenset(_INSTALLER_NAMES)
 # pypinfo's own --timeout default is 120s. Pad to 180s so the BigQuery
 # call has its own budget plus startup/teardown overhead before our outer
 # subprocess.run() abort kicks in. A subprocess hang here would otherwise
@@ -113,7 +117,7 @@ def run_pypinfo(
     *,
     credential_file: Path,
     runner: Runner = _default_runner,
-) -> int:
+) -> dict[str, int]:
     # Note: do NOT pass `-a/--auth <path>` on argv. pypinfo (cli.py:130-133)
     # short-circuits to a credential-setter path when --auth is present and
     # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
@@ -163,7 +167,12 @@ def run_pypinfo(
     if not isinstance(rows, list):
         raise CollectorError(f"pypinfo output missing 'rows' list for {package!r}")
 
-    total = 0
+    # Initialize counts to 0 for every allowlisted installer so the returned
+    # dict shape is stable regardless of which installers had rows in this
+    # window. Order follows _INSTALLER_NAMES so callers can rely on iteration
+    # order for badge filenames and tests can assert on equality with a
+    # specific dict literal.
+    counts: dict[str, int] = {name: 0 for name in _INSTALLER_NAMES}
     for row in rows:
         if not isinstance(row, dict):
             raise CollectorError(
@@ -183,15 +192,16 @@ def run_pypinfo(
             raise CollectorError(
                 f"pypinfo row for {package!r} missing 'installer_name' field: {row!r}"
             )
-        if row["installer_name"] not in _INSTALLER_ALLOWLIST:
+        installer = row["installer_name"]
+        if installer not in _INSTALLER_ALLOWLIST:
             continue
         count = row.get("download_count", 0)
         if not isinstance(count, int):
             raise CollectorError(
                 f"pypinfo row for {package!r} has non-integer download_count: {count!r}"
             )
-        total += count
-    return total
+        counts[installer] += count
+    return counts
 
 
 def collect(
@@ -239,12 +249,17 @@ def _collect_one(
     runner: Runner,
 ) -> PackageOutcome:
     try:
-        count = run_pypinfo(
+        counts = run_pypinfo(
             pkg.name,
             pkg.window_days,
             credential_file=config.service.credential_file,
             runner=runner,
         )
+        # Sum per-installer counts to produce the hero badge total. The v1
+        # hero badge combines all six allowlisted installers into a single
+        # number; per-installer breakdown badges are handled separately in
+        # subsequent steps.
+        count = sum(counts.values())
         badge_path = (
             config.service.output_dir
             / pkg.name

@@ -135,9 +135,9 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("realpkg", 30, credential_file=creds)
+    result = run_pypinfo("realpkg", 30, credential_file=creds)
 
-    assert count == 11, "default runner did not actually execute the subprocess"
+    assert sum(result.values()) == 11, "default runner did not actually execute the subprocess"
     observed_env, observed_argv = obs_file.read_text().splitlines()
     assert observed_env == str(creds), "GOOGLE_APPLICATION_CREDENTIALS did not reach child"
     argv_parts = observed_argv.split(",")
@@ -212,9 +212,9 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
     expected_creds = tmp_path / "expected-creds.json"
     expected_creds.write_text("{}")
 
-    count = run_pypinfo("pkg", 30, credential_file=expected_creds)
+    result = run_pypinfo("pkg", 30, credential_file=expected_creds)
 
-    assert count == 1
+    assert sum(result.values()) == 1
     assert obs_creds.read_text() == str(expected_creds), (
         "pypinfo's persisted db.json took priority over GOOGLE_APPLICATION_CREDENTIALS — "
         "XDG_DATA_HOME isolation in run_pypinfo is missing or broken"
@@ -239,9 +239,9 @@ def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> No
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 95
+    assert sum(result.values()) == 95
 
 
 def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> None:
@@ -281,9 +281,55 @@ def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> N
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 80, "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
+    assert sum(result.values()) == 80, (
+        "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
+    )
+
+
+def test_run_pypinfo_returns_per_installer_dict(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 50},
+        {"installer_name": "pipenv", "ci": "False", "download_count": 1},
+        {"installer_name": "pipx", "ci": "False", "download_count": 2},
+        {"installer_name": "uv", "ci": "False", "download_count": 60},
+        {"installer_name": "poetry", "ci": "False", "download_count": 11},
+        {"installer_name": "pdm", "ci": "False", "download_count": 3},
+        # bandersnatch is a mirror tool; not in allowlist — excluded
+        {"installer_name": "bandersnatch", "ci": "False", "download_count": 999},
+        {"installer_name": "pip", "ci": "True", "download_count": 1000},  # excluded by CI filter
+    ]
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert result == {"pip": 50, "pipenv": 1, "pipx": 2, "uv": 60, "poetry": 11, "pdm": 3}
+
+
+def test_run_pypinfo_zeroes_installers_with_no_rows(tmp_path: Path) -> None:
+    creds = tmp_path / "key.json"
+    creds.write_text("{}")
+
+    rows = [
+        {"installer_name": "pip", "ci": "False", "download_count": 100},
+    ]
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    result = run_pypinfo("solopkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert result == {"pip": 100, "pipenv": 0, "pipx": 0, "uv": 0, "poetry": 0, "pdm": 0}
 
 
 def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> None:
@@ -312,9 +358,10 @@ def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> N
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 63  # 1+2+4+8+16+32
+    assert sum(result.values()) == 63  # 1+2+4+8+16+32
+    assert all(result[name] > 0 for name in ("pip", "pipenv", "pipx", "uv", "poetry", "pdm"))
 
 
 def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
@@ -341,9 +388,9 @@ def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 100, "case-mismatched variants must be excluded"
+    assert sum(result.values()) == 100, "case-mismatched variants must be excluded"
 
 
 def test_run_pypinfo_raises_on_missing_installer_name_field(tmp_path: Path) -> None:
@@ -377,9 +424,9 @@ def test_run_pypinfo_returns_zero_when_rows_empty(tmp_path: Path) -> None:
     creds = tmp_path / "creds.json"
     creds.write_text("{}")
 
-    count = run_pypinfo("newpkg", 30, credential_file=creds, runner=fake_runner)
+    result = run_pypinfo("newpkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert count == 0
+    assert sum(result.values()) == 0
 
 
 def test_run_pypinfo_raises_on_nonzero_exit(tmp_path: Path) -> None:
