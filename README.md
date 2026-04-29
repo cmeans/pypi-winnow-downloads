@@ -146,11 +146,16 @@ or run your own collector — see
 
 ## Status
 
-Alpha. Self-hosted reference deployment running at
-`pypi-badges.intfar.com`, producing daily badges for four target
-packages (the three seed packages in `config.example.yaml` plus
-`pypi-winnow-downloads` itself for the dogfood badge). Expect rough
-edges and possible breaking changes in the 0.x series.
+Beta as of v0.2.0. Self-hosted reference deployment running at
+`pypi-badges.intfar.com` since 2026-04-25, producing daily badges for
+four target packages (the three seed packages in `config.example.yaml`
+plus `pypi-winnow-downloads` itself for the dogfood badge). Test suite
+holds 100% line coverage on `src/`. The v1 hero badge JSON shape and
+filename are stable and won't change before 1.0; new badge files may
+be added (the v2 installer-mix breakdown landed in v0.2.0 alongside
+the unchanged hero). Expect occasional breaking changes elsewhere in
+the 0.x series — the [`Changed`/`Removed` sections of CHANGELOG.md](https://github.com/cmeans/pypi-winnow-downloads/blob/main/CHANGELOG.md)
+are where to look on each release.
 
 ## Acknowledgments
 
