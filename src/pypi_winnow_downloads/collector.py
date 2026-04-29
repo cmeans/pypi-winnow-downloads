@@ -59,6 +59,27 @@ _INSTALLER_BADGE_SPECS: tuple[tuple[str, str, str], ...] = (
 # assert against. Allowlist keeps the same membership; tuple gives us order.
 _INSTALLER_NAMES: tuple[str, ...] = ("pip", "pipenv", "pipx", "uv", "poetry", "pdm")
 _INSTALLER_ALLOWLIST: frozenset[str] = frozenset(_INSTALLER_NAMES)
+
+# System (OS) allowlist for the per-OS breakdown. The same `details.ci != True`
+# filter applies as the hero. The keys are pypinfo's raw `system_name` values
+# (matches BigQuery's `details.system.name` column emission); the badge
+# filename slug and label use the user-friendly `macos` for `Darwin`. Long-tail
+# values (BSD variants, null/empty system_name) are excluded — they neither
+# contribute to per-OS aggregates nor surface as a badge.
+_SYSTEM_NAMES: tuple[str, ...] = ("Linux", "Darwin", "Windows")
+_SYSTEM_ALLOWLIST: frozenset[str] = frozenset(_SYSTEM_NAMES)
+
+# Per-OS badge specs: (filename_template, label_template, counts_key).
+# Order matches the README dogfood layout. `counts_key` is the raw pypinfo
+# emission (matches `_SYSTEM_ALLOWLIST`); the slug/label use the user-friendly
+# form. Hero count is unaffected — see spec for the v0.2.0 hero-stability
+# invariant.
+_OS_BADGE_SPECS: tuple[tuple[str, str, str], ...] = (
+    ("os-linux-{days}d-non-ci.json", "linux ({days}d)", "Linux"),
+    ("os-macos-{days}d-non-ci.json", "macos ({days}d)", "Darwin"),
+    ("os-windows-{days}d-non-ci.json", "windows ({days}d)", "Windows"),
+)
+
 # pypinfo's own --timeout default is 120s. Pad to 180s so the BigQuery
 # call has its own budget plus startup/teardown overhead before our outer
 # subprocess.run() abort kicks in. A subprocess hang here would otherwise
