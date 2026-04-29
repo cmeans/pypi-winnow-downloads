@@ -17,4 +17,4 @@ build/
 coverage.xml
 
 # Private operator tooling — never published. See .deploy/specs/ for design.
-/.deploy/
+.deploy/
