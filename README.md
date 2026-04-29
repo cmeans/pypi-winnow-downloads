@@ -19,20 +19,25 @@ any existing alternative for small or young Python packages.
 > Both views track the same `pypi-winnow-downloads` package over a 30-day non-CI
 > window.
 
-<p>
-<strong style="vertical-align: middle;">Total:</strong>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json" alt="pip*/uv/poetry/pdm downloads" align="middle" style="vertical-align: middle;"></a>
-</p>
-
-<p>
-<strong style="vertical-align: middle;">By installer:</strong>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pip-30d-non-ci.json" alt="pip downloads" align="middle" style="vertical-align: middle;"></a>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pipenv-30d-non-ci.json" alt="pipenv downloads" align="middle" style="vertical-align: middle;"></a>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pipx-30d-non-ci.json" alt="pipx downloads" align="middle" style="vertical-align: middle;"></a>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-uv-30d-non-ci.json" alt="uv downloads" align="middle" style="vertical-align: middle;"></a>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-poetry-30d-non-ci.json" alt="poetry downloads" align="middle" style="vertical-align: middle;"></a>
-<a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pdm-30d-non-ci.json" alt="pdm downloads" align="middle" style="vertical-align: middle;"></a>
-</p>
+<table style="border-collapse: collapse; border: none;">
+  <tr style="background: none; border: none;">
+    <td style="border: none; padding: 2px 12px 2px 0;"><strong>Total:</strong></td>
+    <td style="border: none; padding: 2px 0;">
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fdownloads-30d-non-ci.json" alt="pip*/uv/poetry/pdm downloads"></a>
+    </td>
+  </tr>
+  <tr style="background: none; border: none;">
+    <td style="border: none; padding: 2px 12px 2px 0;"><strong>By installer:</strong></td>
+    <td style="border: none; padding: 2px 0;">
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pip-30d-non-ci.json" alt="pip downloads"></a>
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pipenv-30d-non-ci.json" alt="pipenv downloads"></a>
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pipx-30d-non-ci.json" alt="pipx downloads"></a>
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-uv-30d-non-ci.json" alt="uv downloads"></a>
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-poetry-30d-non-ci.json" alt="poetry downloads"></a>
+      <a href="https://pypi.org/project/pypi-winnow-downloads/"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pdm-30d-non-ci.json" alt="pdm downloads"></a>
+    </td>
+  </tr>
+</table>
 
 ## What these badges actually count
 
