@@ -120,6 +120,7 @@ class PackageOutcome:
     window_days: int
     count: int | None
     counts: dict[str, int] | None = None
+    counts_by_system: dict[str, int] | None = None
     error: str | None = None
 
     @property
@@ -304,6 +305,7 @@ def _collect_one(
             runner=runner,
         )
         per_installer = pypinfo_result["by_installer"]
+        per_system = pypinfo_result["by_system"]
         # Compute the v1 hero total + the pip-family aggregate. Build a single
         # dict so the per-installer badge writer below can do a uniform lookup.
         hero_total = sum(per_installer.values())
@@ -339,6 +341,19 @@ def _collect_one(
                     label=label_tpl.format(days=pkg.window_days),
                 ),
             )
+
+        # Per-OS badges (linux + macos + windows). The counts_key matches
+        # pypinfo's raw system_name emission; the slug/label use macos for
+        # Darwin (user-friendly form). Hero count is unaffected.
+        for fname_tpl, label_tpl, key in _OS_BADGE_SPECS:
+            os_path = config.service.output_dir / pkg.name / fname_tpl.format(days=pkg.window_days)
+            badge.write_badge(
+                path=os_path,
+                payload=badge.build_payload(
+                    count=per_system[key],
+                    label=label_tpl.format(days=pkg.window_days),
+                ),
+            )
     except (CollectorError, OSError) as e:
         # Per-package isolation: a single package's BigQuery failure or disk
         # write failure must not abort the whole run, and must not skip the
@@ -351,7 +366,7 @@ def _collect_one(
 
     logger.info(
         "collector: wrote %d badges for %s (hero count=%d, path=%s)",
-        1 + len(_INSTALLER_BADGE_SPECS),
+        1 + len(_INSTALLER_BADGE_SPECS) + len(_OS_BADGE_SPECS),
         pkg.name,
         hero_total,
         hero_path.parent,
@@ -361,6 +376,7 @@ def _collect_one(
         window_days=pkg.window_days,
         count=hero_total,
         counts=counts,
+        counts_by_system=per_system,
     )
 
 

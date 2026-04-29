@@ -1032,7 +1032,7 @@ def _seed_previous_health(output_dir: Path, finished: datetime) -> None:
     (output_dir / "_health.json").write_text(json.dumps(payload))
 
 
-def test_collect_writes_eight_files_per_successful_package(tmp_path: Path) -> None:
+def test_collect_writes_eleven_files_per_successful_package(tmp_path: Path) -> None:
     creds = tmp_path / "key.json"
     creds.write_text("{}")
     output_dir = tmp_path / "out"
@@ -1072,6 +1072,9 @@ def test_collect_writes_eight_files_per_successful_package(tmp_path: Path) -> No
         "installer-poetry-30d-non-ci.json",
         "installer-pdm-30d-non-ci.json",
         "installer-pip-family-30d-non-ci.json",
+        "os-linux-30d-non-ci.json",
+        "os-macos-30d-non-ci.json",
+        "os-windows-30d-non-ci.json",
     }
     assert {p.name for p in pkg_dir.iterdir()} == expected
 
@@ -1312,3 +1315,103 @@ def test_collect_staleness_silent_on_previous_health_missing_finished_key(
     debug_records = [r for r in caplog.records if "previous _health.json unparseable" in r.message]
     assert len(debug_records) == 1
     assert debug_records[0].levelname == "DEBUG"
+
+
+def test_collect_one_writes_three_per_os_badge_files(tmp_path: Path) -> None:
+    """v3 OS distribution: collector emits os-linux-30d-non-ci.json,
+    os-macos-30d-non-ci.json, os-windows-30d-non-ci.json with the
+    correct shields.io shape."""
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"ci": "False", "download_count": 100, "installer_name": "pip", "system_name": "Linux"},
+        {"ci": "False", "download_count": 30, "installer_name": "pip", "system_name": "Darwin"},
+        {"ci": "False", "download_count": 5, "installer_name": "uv", "system_name": "Windows"},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    pkg_dir = output_dir / "mypkg"
+    linux = json.loads((pkg_dir / "os-linux-30d-non-ci.json").read_text())
+    macos = json.loads((pkg_dir / "os-macos-30d-non-ci.json").read_text())
+    windows = json.loads((pkg_dir / "os-windows-30d-non-ci.json").read_text())
+
+    assert linux["label"] == "linux (30d)"
+    assert linux["message"] == "100"
+    assert linux["color"] == "blue"
+
+    assert macos["label"] == "macos (30d)"
+    assert macos["message"] == "30"
+    assert macos["color"] == "blue"
+
+    assert windows["label"] == "windows (30d)"
+    assert windows["message"] == "5"
+    # 5 < 10 → lightgrey per the existing color logic.
+    assert windows["color"] == "lightgrey"
+
+
+def test_collect_one_v0_2_0_files_unchanged_alongside_os_files(tmp_path: Path) -> None:
+    """The v3 OS feature must not change v0.2.0's filename, schema, or value
+    for any given pypinfo response. Asserts existence + shape of all
+    pre-v3 files plus the 3 new OS files = 11 total per package per window."""
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    output_dir = tmp_path / "out"
+
+    rows = [
+        {"ci": "False", "download_count": 100, "installer_name": "pip", "system_name": "Linux"},
+    ]
+
+    def fake_runner(argv: Sequence[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(argv), returncode=0, stdout=json.dumps({"rows": rows}), stderr=""
+        )
+
+    config = Config(
+        service=ServiceConfig(
+            credential_file=creds,
+            output_dir=output_dir,
+            stale_threshold_days=3,
+        ),
+        packages=(PackageConfig(name="mypkg", window_days=30),),
+    )
+
+    collect(config, runner=fake_runner)
+
+    pkg_dir = output_dir / "mypkg"
+    expected = {
+        "downloads-30d-non-ci.json",
+        "installer-pip-30d-non-ci.json",
+        "installer-pipenv-30d-non-ci.json",
+        "installer-pipx-30d-non-ci.json",
+        "installer-uv-30d-non-ci.json",
+        "installer-poetry-30d-non-ci.json",
+        "installer-pdm-30d-non-ci.json",
+        "installer-pip-family-30d-non-ci.json",
+        "os-linux-30d-non-ci.json",
+        "os-macos-30d-non-ci.json",
+        "os-windows-30d-non-ci.json",
+    }
+    actual = {p.name for p in pkg_dir.iterdir()}
+    assert expected == actual, f"missing: {expected - actual}, extra: {actual - expected}"
+
+    # Hero schema unchanged.
+    hero = json.loads((pkg_dir / "downloads-30d-non-ci.json").read_text())
+    assert hero["message"] == "100"
+    assert hero["label"] == "pip*/uv/poetry/pdm (30d)"
