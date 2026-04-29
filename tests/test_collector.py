@@ -10,6 +10,7 @@ import pytest
 from pypi_winnow_downloads import collector as collector_module
 from pypi_winnow_downloads.collector import (
     CollectorError,
+    PackageOutcome,
     _resolve_pypinfo_path,
     collect,
     run_pypinfo,
@@ -521,6 +522,33 @@ def test_run_pypinfo_raises_on_subprocess_timeout(tmp_path: Path) -> None:
 
     with pytest.raises(CollectorError, match="timed out"):
         run_pypinfo("mypkg", 30, credential_file=creds, runner=slow_runner)
+
+
+# --- PackageOutcome dataclass ---
+
+
+def test_package_outcome_carries_per_installer_counts() -> None:
+    counts_dict = {
+        "pip": 50,
+        "pipenv": 1,
+        "pipx": 2,
+        "uv": 30,
+        "poetry": 11,
+        "pdm": 6,
+        "pip-family": 53,
+    }
+    outcome = PackageOutcome(
+        package="foo",
+        window_days=30,
+        count=100,
+        counts=counts_dict,
+    )
+    assert outcome.counts == counts_dict
+    assert outcome.count == 100  # backwards-compat field unchanged
+
+    # Default for failure path: no counts.
+    failed = PackageOutcome(package="bar", window_days=30, count=None, error="boom")
+    assert failed.counts is None
 
 
 # --- collect() orchestration ---

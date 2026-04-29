@@ -77,6 +77,7 @@ class PackageOutcome:
     package: str
     window_days: int
     count: int | None
+    counts: dict[str, int] | None = None
     error: str | None = None
 
     @property
