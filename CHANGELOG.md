@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`.github/workflows/uv-lock-refresh.yml`** new scheduled workflow runs `uv lock --upgrade` every Thursday 12:00 UTC as a backstop for transitive dependency freshness — picks up minor/patch bumps that Dependabot's advisory- and cascade-driven flow hasn't yet surfaced. Skip-gate defers the run if a `dependencies` + `python`-labeled PR is already open (Dependabot mid-cycle or prior cron PR pending QA), so PRs don't overlap. Test gate (`uv sync --frozen --extra dev && uv run pytest`) blocks PR creation if the new lockfile breaks the suite. PR is opened via the existing `cmeans-claude-dev[bot]` App token (same path as `dependabot-changelog.yml`) so downstream CI checks (lint, typecheck, test, version-sync) fire on the bot's push and don't leave the merge gate stuck. Most weeks: no PR (Dependabot already covered transitives via cascade). Spec: `docs/superpowers/specs/2026-04-29-uv-lock-refresh-cron-design.md`.
+
 ### Changed
 
 - **`.gitignore`** ignores a private operator-tooling directory `.deploy/` at the repo root so maintainer-specific deploy scripts and design docs stay out of public history. The directory holds tooling like `update-collector.sh` (drives the CT 112 deployment via `WINNOW_REMOTE_RUN`) plus matching design / plan documents — parameterized in principle but maintainer-shaped in practice (SSH-to-Holodeck, `pct exec`, journald awareness). Other self-hosters can use plain `uv pip install --upgrade pypi-winnow-downloads`; this tooling does not need a public contract or maintenance burden. Rule is unanchored (`.deploy/`) to match the convention of the rest of the file (`.venv/`, `dist/`, `__pycache__/` etc. are all unanchored). Internal-only; no user-facing behavior change.

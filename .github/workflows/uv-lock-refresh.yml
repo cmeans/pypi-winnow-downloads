@@ -1,0 +1,209 @@
+name: uv lock refresh
+
+# Weekly backstop for transitive dependency freshness. Runs uv lock
+# --upgrade and opens a PR if the resulting uv.lock differs from main.
+# Skips when a Dependabot or prior-cron PR is already open (avoid
+# overlapping PRs).
+#
+# Pushes via a GitHub App installation token rather than
+# secrets.GITHUB_TOKEN because GITHUB_TOKEN-authored pushes do NOT
+# trigger downstream pull_request workflows (GitHub anti-loop policy),
+# which would leave required CI checks (lint, typecheck, test,
+# version-sync) unsatisfied and block merge under the repo's
+# main-branch ruleset. Same constraint and same fix as
+# .github/workflows/dependabot-changelog.yml.
+#
+# Required repo secrets (already configured for dependabot-changelog.yml):
+#   BOT_APP_ID         — GitHub App ID
+#   BOT_APP_PRIVATE_KEY — PEM contents of the App's private key
+#
+# Spec: docs/superpowers/specs/2026-04-29-uv-lock-refresh-cron-design.md
+
+on:
+  schedule:
+    - cron: '0 12 * * 4'   # Thursday 12:00 UTC = 07:00 America/Chicago
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip-gate — open dep PR
+        id: skip-gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          OPEN_DEP_PRS=$(gh pr list --label dependencies --label python --state open --json number --jq 'length')
+          echo "Open dep PR count: $OPEN_DEP_PRS"
+          if [ "$OPEN_DEP_PRS" -ne 0 ]; then
+            echo "Open dep PR(s) found; deferring this week."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint GitHub App installation token
+        if: steps.skip-gate.outputs.skip != 'true'
+        id: app-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
+      - name: Checkout main
+        if: steps.skip-gate.outputs.skip != 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 1
+
+      - name: Set up uv
+        if: steps.skip-gate.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run uv lock --upgrade
+        if: steps.skip-gate.outputs.skip != 'true'
+        run: uv lock --upgrade
+
+      - name: Diff-gate — exit if uv.lock unchanged
+        if: steps.skip-gate.outputs.skip != 'true'
+        id: diff-gate
+        run: |
+          if git diff --quiet uv.lock; then
+            echo "uv.lock unchanged; nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "uv.lock changed."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat uv.lock
+            git diff --stat uv.lock > /tmp/uv-lock-diff-stat.txt
+          fi
+
+      - name: Test gate — pytest against new lockfile
+        if: steps.skip-gate.outputs.skip != 'true' && steps.diff-gate.outputs.changed == 'true'
+        run: |
+          uv sync --frozen --extra dev
+          uv run pytest
+
+      - name: Add CHANGELOG bullet
+        if: steps.skip-gate.outputs.skip != 'true' && steps.diff-gate.outputs.changed == 'true'
+        run: |
+          python3 - <<'PY'
+          import pathlib
+
+          entry = (
+              "- **`uv.lock`** transitive dependency pins refreshed via routine "
+              "`uv lock --upgrade` resolve. Backstop for transitive bumps not yet "
+              "picked up by Dependabot. No `pyproject.toml` range changes.\n"
+          )
+
+          path = pathlib.Path("CHANGELOG.md")
+          text = path.read_text()
+          lines = text.splitlines(keepends=True)
+
+          # Locate `## [Unreleased]` (or `## Unreleased`).
+          unreleased_idx = None
+          unreleased_heading = "## [Unreleased]"
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              if stripped == "## Unreleased" or stripped == "## [Unreleased]":
+                  unreleased_idx = i
+                  unreleased_heading = stripped
+                  break
+
+          if unreleased_idx is None:
+              # Insert fresh Unreleased after the title.
+              insert_at = 0
+              for i, line in enumerate(lines):
+                  if line.startswith("# "):
+                      insert_at = i + 1
+                      break
+              new_block = ["\n", f"{unreleased_heading}\n", "\n", "### Changed\n", "\n", entry]
+              lines = lines[:insert_at] + new_block + lines[insert_at:]
+          else:
+              # Find ### Changed between Unreleased and next ## heading.
+              changed_idx = None
+              end_idx = len(lines)
+              for j in range(unreleased_idx + 1, len(lines)):
+                  if lines[j].startswith("## "):
+                      end_idx = j
+                      break
+                  if lines[j].strip() == "### Changed":
+                      changed_idx = j
+                      break
+              if changed_idx is not None:
+                  insert_at = changed_idx + 1
+                  if insert_at < end_idx and lines[insert_at].strip() == "":
+                      insert_at += 1
+                  lines.insert(insert_at, entry)
+              else:
+                  # Insert ### Changed at the right KaC v1.1.0 position
+                  # (Added → Changed → Deprecated → Removed → Fixed → Security).
+                  after_changed = {"### Deprecated", "### Removed", "### Fixed", "### Security"}
+                  insert_at = end_idx
+                  for j in range(unreleased_idx + 1, end_idx):
+                      if lines[j].strip() in after_changed:
+                          insert_at = j
+                          break
+                  block = ["### Changed\n", "\n", entry, "\n"]
+                  for k, ln in enumerate(block):
+                      lines.insert(insert_at + k, ln)
+
+          path.write_text("".join(lines))
+          print("Inserted CHANGELOG entry.")
+          PY
+
+      - name: Commit, push branch, open PR
+        if: steps.skip-gate.outputs.skip != 'true' && steps.diff-gate.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_BOT_USER_ID: '272174644'
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          BRANCH="chore/uv-lock-refresh-$DATE"
+          git config user.name "cmeans-claude-dev[bot]"
+          git config user.email "${GH_BOT_USER_ID}+cmeans-claude-dev[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add uv.lock CHANGELOG.md
+          git commit -m "chore(deps): refresh uv.lock transitive pins ($DATE)"
+          git push -u origin "$BRANCH"
+
+          DIFF_STAT=$(cat /tmp/uv-lock-diff-stat.txt)
+          {
+            echo "## Summary"
+            echo
+            echo "Routine \`uv lock --upgrade\` refresh — backstop for transitive dependency bumps that haven't yet been picked up by Dependabot's advisory- and cascade-driven flow."
+            echo
+            echo "- No \`pyproject.toml\` range changes."
+            echo "- Test suite passed against the new lockfile (test gate before PR opened)."
+            echo "- This is the cron in \`.github/workflows/uv-lock-refresh.yml\` — see spec at \`docs/superpowers/specs/2026-04-29-uv-lock-refresh-cron-design.md\`."
+            echo
+            echo "## Diff stat"
+            echo
+            echo '```'
+            echo "$DIFF_STAT"
+            echo '```'
+            echo
+            echo "## Test plan"
+            echo
+            echo "- [x] \`uv sync --frozen --extra dev && uv run pytest\` passes (test gate)."
+            echo "- [ ] CI green on PR head."
+            echo "- [ ] No \`pyproject.toml\` lines changed (verify in Files tab)."
+            echo
+            echo "🤖 Generated by uv-lock-refresh.yml"
+          } > /tmp/uv-lock-pr-body.md
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(deps): refresh uv.lock transitive pins ($DATE)" \
+            --body-file /tmp/uv-lock-pr-body.md \
+            --label "dependencies" \
+            --label "python" \
+            --label "Ready for QA"
