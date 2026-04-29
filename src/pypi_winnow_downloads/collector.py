@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from . import badge
 from .config import Config, PackageConfig
@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 # passed by run_pypinfo so tests can assert on each independently.
 Runner = Callable[[Sequence[str], dict[str, str]], subprocess.CompletedProcess[str]]
 Clock = Callable[[], datetime]
+
+
+class RunPypinfoResult(TypedDict):
+    by_installer: dict[str, int]
+    by_system: dict[str, int]
+
 
 _BADGE_LABEL_TEMPLATE = "pip*/uv/poetry/pdm ({days}d)"
 _BADGE_FILENAME_TEMPLATE = "downloads-{days}d-non-ci.json"
@@ -154,7 +160,7 @@ def run_pypinfo(
     *,
     credential_file: Path,
     runner: Runner = _default_runner,
-) -> dict[str, int]:
+) -> RunPypinfoResult:
     # Note: do NOT pass `-a/--auth <path>` on argv. pypinfo (cli.py:130-133)
     # short-circuits to a credential-setter path when --auth is present and
     # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
@@ -168,6 +174,7 @@ def run_pypinfo(
         package,
         "ci",
         "installer",
+        "system",
     ]
 
     # XDG_DATA_HOME isolation: pypinfo's get_credentials() (db.py:23-26 via
@@ -204,41 +211,45 @@ def run_pypinfo(
     if not isinstance(rows, list):
         raise CollectorError(f"pypinfo output missing 'rows' list for {package!r}")
 
-    # Initialize counts to 0 for every allowlisted installer so the returned
-    # dict shape is stable regardless of which installers had rows in this
-    # window. Order follows _INSTALLER_NAMES so callers can rely on iteration
-    # order for badge filenames and tests can assert on equality with a
-    # specific dict literal.
-    counts: dict[str, int] = {name: 0 for name in _INSTALLER_NAMES}
+    # Initialize both dicts to zero for every allowlisted key so the returned
+    # shape is stable regardless of which (installer, system) pairs had rows
+    # in this window. Order follows _INSTALLER_NAMES / _SYSTEM_NAMES so callers
+    # can rely on iteration order for badge filenames and tests can assert on
+    # equality with specific dict literals.
+    by_installer: dict[str, int] = {name: 0 for name in _INSTALLER_NAMES}
+    by_system: dict[str, int] = {name: 0 for name in _SYSTEM_NAMES}
     for row in rows:
         if not isinstance(row, dict):
             raise CollectorError(
                 f"pypinfo row for {package!r} has unexpected shape (not a dict): {row!r}"
             )
-        # pypinfo emits ci as the *string* "True" / "False" / "None" — BigQuery
-        # cell values are passed through str() in pypinfo's parse_query_result.
-        # If a future pypinfo version emits a native bool/None instead, this
-        # comparison would silently flip and start counting CI traffic as
-        # non-CI; the non-dict-row guard above catches schema breaks loudly.
         if row.get("ci") == "True":
             continue
-        # installer_name is required when we pivot by `installer`; missing
-        # the column means pypinfo's schema changed under us and we should
-        # fail loudly rather than silently undercount.
         if "installer_name" not in row:
             raise CollectorError(
                 f"pypinfo row for {package!r} missing 'installer_name' field: {row!r}"
             )
         installer = row["installer_name"]
-        if installer not in _INSTALLER_ALLOWLIST:
-            continue
         count = row.get("download_count", 0)
         if not isinstance(count, int):
             raise CollectorError(
                 f"pypinfo row for {package!r} has non-integer download_count: {count!r}"
             )
-        counts[installer] += count
-    return counts
+
+        # Per-installer aggregation: hero-stability invariant — count
+        # the row regardless of system_name, as long as the installer is
+        # allowlisted. v0.2.0's hero-count contract depends on this.
+        if installer in _INSTALLER_ALLOWLIST:
+            by_installer[installer] += count
+
+        # Per-system aggregation: independent allowlist check. Rows with
+        # missing/empty/non-allowlisted system_name drop out of by_system
+        # but may still contribute to by_installer above.
+        system = row.get("system_name", "")
+        if system in _SYSTEM_ALLOWLIST:
+            by_system[system] += count
+
+    return {"by_installer": by_installer, "by_system": by_system}
 
 
 def collect(
@@ -286,12 +297,13 @@ def _collect_one(
     runner: Runner,
 ) -> PackageOutcome:
     try:
-        per_installer = run_pypinfo(
+        pypinfo_result = run_pypinfo(
             pkg.name,
             pkg.window_days,
             credential_file=config.service.credential_file,
             runner=runner,
         )
+        per_installer = pypinfo_result["by_installer"]
         # Compute the v1 hero total + the pip-family aggregate. Build a single
         # dict so the per-installer badge writer below can do a uniform lookup.
         hero_total = sum(per_installer.values())

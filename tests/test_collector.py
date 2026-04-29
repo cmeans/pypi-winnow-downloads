@@ -64,6 +64,129 @@ def test_run_pypinfo_invokes_pypinfo_with_expected_argv(tmp_path: Path) -> None:
     assert "--auth" not in argv
 
 
+def test_run_pypinfo_argv_groups_by_ci_installer_system(tmp_path: Path) -> None:
+    """v3 OS distribution: pypinfo group-by extended from `ci installer` to
+    `ci installer system` so a single BigQuery call returns both dimensions."""
+    captured: list[list[str]] = []
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        captured.append(list(argv))
+        return _ok_result(argv)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert captured, "fake_runner was never called"
+    argv = captured[0]
+    # The three positional dimension args must appear in this order at the end of argv.
+    assert argv[-3:] == ["ci", "installer", "system"], argv
+
+
+def _ok_rows(rows: list[dict]) -> str:
+    """Helper: shape an `_ok_result` JSON payload from a list of pypinfo row dicts."""
+    return json.dumps({"rows": rows})
+
+
+def test_run_pypinfo_returns_by_installer_and_by_system(tmp_path: Path) -> None:
+    """Return shape is a structured dict with two aggregates."""
+    stdout = _ok_rows(
+        [
+            {"ci": "False", "download_count": 100, "installer_name": "pip", "system_name": "Linux"},
+            {"ci": "False", "download_count": 30, "installer_name": "pip", "system_name": "Darwin"},
+            {"ci": "False", "download_count": 20, "installer_name": "uv", "system_name": "Linux"},
+            {"ci": "False", "download_count": 5, "installer_name": "uv", "system_name": "Windows"},
+        ]
+    )
+
+    def fake_runner(argv, env):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert result == {
+        "by_installer": {"pip": 130, "pipenv": 0, "pipx": 0, "uv": 25, "poetry": 0, "pdm": 0},
+        "by_system": {"Linux": 120, "Darwin": 30, "Windows": 5},
+    }
+
+
+def test_run_pypinfo_filters_out_non_allowlisted_systems(tmp_path: Path) -> None:
+    """Long-tail OSes (BSD, null, etc.) drop out of by_system but still
+    contribute to by_installer when the installer is allowlisted — the
+    v0.2.0 hero-stability invariant."""
+    stdout = _ok_rows(
+        [
+            {"ci": "False", "download_count": 100, "installer_name": "pip", "system_name": "Linux"},
+            {"ci": "False", "download_count": 7, "installer_name": "pip", "system_name": "FreeBSD"},
+            {"ci": "False", "download_count": 11, "installer_name": "pip", "system_name": ""},
+            {
+                "ci": "False",
+                "download_count": 13,
+                "installer_name": "pip",
+                "system_name": "OpenBSD",
+            },
+        ]
+    )
+
+    def fake_runner(argv, env):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    # Hero stability: by_installer["pip"] = 100 + 7 + 11 + 13 = 131 (all 4 rows count).
+    assert result["by_installer"]["pip"] == 131
+    # by_system: only the Linux row counts; non-allowlisted/empty system_name rows drop out.
+    assert result["by_system"] == {"Linux": 100, "Darwin": 0, "Windows": 0}
+
+
+def test_run_pypinfo_excludes_ci_true_from_both_dimensions(tmp_path: Path) -> None:
+    """CI traffic is filtered before either dimension's aggregation."""
+    stdout = _ok_rows(
+        [
+            {"ci": "True", "download_count": 9999, "installer_name": "pip", "system_name": "Linux"},
+            {"ci": "None", "download_count": 50, "installer_name": "pip", "system_name": "Linux"},
+            {"ci": "False", "download_count": 10, "installer_name": "pip", "system_name": "Linux"},
+        ]
+    )
+
+    def fake_runner(argv, env):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    # CI=True row dropped; CI=None and CI=False rows count (matches v1 behavior).
+    assert result["by_installer"]["pip"] == 60
+    assert result["by_system"]["Linux"] == 60
+
+
+def test_run_pypinfo_handles_missing_system_name_field(tmp_path: Path) -> None:
+    """A row missing the system_name key entirely (older pypinfo schema or
+    user-agent parsing failure) must not crash; it just doesn't contribute
+    to by_system."""
+    stdout = _ok_rows(
+        [
+            {"ci": "False", "download_count": 42, "installer_name": "pip", "system_name": "Linux"},
+            {"ci": "False", "download_count": 8, "installer_name": "pip"},  # no system_name
+        ]
+    )
+
+    def fake_runner(argv, env):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    assert result["by_installer"]["pip"] == 50
+    assert result["by_system"] == {"Linux": 42, "Darwin": 0, "Windows": 0}
+
+
 def test_resolve_pypinfo_path_neighbors_sys_executable() -> None:
     """The resolver returns the pypinfo console script that lives in the
     same directory as the running Python interpreter — i.e., the same
@@ -139,7 +262,9 @@ def test_run_pypinfo_real_subprocess_passes_env_to_child(
 
     result = run_pypinfo("realpkg", 30, credential_file=creds)
 
-    assert sum(result.values()) == 11, "default runner did not actually execute the subprocess"
+    assert sum(result["by_installer"].values()) == 11, (
+        "default runner did not actually execute the subprocess"
+    )
     observed_env, observed_argv = obs_file.read_text().splitlines()
     assert observed_env == str(creds), "GOOGLE_APPLICATION_CREDENTIALS did not reach child"
     argv_parts = observed_argv.split(",")
@@ -216,7 +341,7 @@ def test_run_pypinfo_isolates_state_so_env_var_wins_over_persisted_creds(
 
     result = run_pypinfo("pkg", 30, credential_file=expected_creds)
 
-    assert sum(result.values()) == 1
+    assert sum(result["by_installer"].values()) == 1
     assert obs_creds.read_text() == str(expected_creds), (
         "pypinfo's persisted db.json took priority over GOOGLE_APPLICATION_CREDENTIALS — "
         "XDG_DATA_HOME isolation in run_pypinfo is missing or broken"
@@ -243,7 +368,7 @@ def test_run_pypinfo_sums_non_ci_rows_and_excludes_ci_true(tmp_path: Path) -> No
 
     result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert sum(result.values()) == 95
+    assert sum(result["by_installer"].values()) == 95
 
 
 def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> None:
@@ -285,7 +410,7 @@ def test_run_pypinfo_filters_out_non_allowlisted_installers(tmp_path: Path) -> N
 
     result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert sum(result.values()) == 80, (
+    assert sum(result["by_installer"].values()) == 80, (
         "expected 50 (pip) + 30 (uv) only; CI rows + mirrors + scrapers excluded"
     )
 
@@ -313,7 +438,14 @@ def test_run_pypinfo_returns_per_installer_dict(tmp_path: Path) -> None:
 
     result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert result == {"pip": 50, "pipenv": 1, "pipx": 2, "uv": 60, "poetry": 11, "pdm": 3}
+    assert result["by_installer"] == {
+        "pip": 50,
+        "pipenv": 1,
+        "pipx": 2,
+        "uv": 60,
+        "poetry": 11,
+        "pdm": 3,
+    }
 
 
 def test_run_pypinfo_zeroes_installers_with_no_rows(tmp_path: Path) -> None:
@@ -331,7 +463,14 @@ def test_run_pypinfo_zeroes_installers_with_no_rows(tmp_path: Path) -> None:
 
     result = run_pypinfo("solopkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert result == {"pip": 100, "pipenv": 0, "pipx": 0, "uv": 0, "poetry": 0, "pdm": 0}
+    assert result["by_installer"] == {
+        "pip": 100,
+        "pipenv": 0,
+        "pipx": 0,
+        "uv": 0,
+        "poetry": 0,
+        "pdm": 0,
+    }
 
 
 def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> None:
@@ -362,8 +501,11 @@ def test_run_pypinfo_allowlist_covers_packaging_tool_family(tmp_path: Path) -> N
 
     result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert sum(result.values()) == 63  # 1+2+4+8+16+32
-    assert all(result[name] > 0 for name in ("pip", "pipenv", "pipx", "uv", "poetry", "pdm"))
+    assert sum(result["by_installer"].values()) == 63  # 1+2+4+8+16+32
+    assert all(
+        result["by_installer"][name] > 0
+        for name in ("pip", "pipenv", "pipx", "uv", "poetry", "pdm")
+    )
 
 
 def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
@@ -392,7 +534,7 @@ def test_run_pypinfo_allowlist_is_case_sensitive(tmp_path: Path) -> None:
 
     result = run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert sum(result.values()) == 100, "case-mismatched variants must be excluded"
+    assert sum(result["by_installer"].values()) == 100, "case-mismatched variants must be excluded"
 
 
 def test_run_pypinfo_raises_on_missing_installer_name_field(tmp_path: Path) -> None:
@@ -428,7 +570,7 @@ def test_run_pypinfo_returns_zero_when_rows_empty(tmp_path: Path) -> None:
 
     result = run_pypinfo("newpkg", 30, credential_file=creds, runner=fake_runner)
 
-    assert sum(result.values()) == 0
+    assert sum(result["by_installer"].values()) == 0
 
 
 def test_run_pypinfo_raises_on_nonzero_exit(tmp_path: Path) -> None:
