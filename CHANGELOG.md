@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`uv.lock`** transitive dependency pins refreshed via routine `uv lock --upgrade` resolve. Backstop for transitive bumps not yet picked up by Dependabot. No `pyproject.toml` range changes.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
