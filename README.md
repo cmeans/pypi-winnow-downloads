@@ -28,6 +28,12 @@ any existing alternative for small or young Python packages.
 [![poetry downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-poetry-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
 [![pdm downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Finstaller-pdm-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
 
+**By OS** (30d, non-CI):
+
+[![linux downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fos-linux-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![macos downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fos-macos-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+[![windows downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fpypi-badges.intfar.com%2Fpypi-winnow-downloads%2Fos-windows-30d-non-ci.json)](https://pypi.org/project/pypi-winnow-downloads/)
+
 ## What these badges actually count
 
 The hero badge — labelled `pip*/uv/poetry/pdm (Nd)` (N=30 in the reference
@@ -66,6 +72,8 @@ applies the same `details.ci != True` filter as the hero — so they answer
 Useful for spotting installer-mix shifts (e.g., uv overtaking pip on a young
 package). See [Use this service for your own package](#use-this-service-for-your-own-package)
 below for the per-installer URL pattern.
+
+**By OS breakdown.** Each per-OS badge applies the same `details.ci != True` filter as the hero — they answer "non-CI downloads on that OS." `Darwin` is pypinfo's emission for what users call macOS; the badge filename and label use `macos`. The per-OS sum can be less than the hero count: rows whose user-agent didn't expose a system_name (or exposed one outside Linux/Darwin/Windows) drop out of the per-OS aggregation but still count toward the hero — same pattern as the per-installer-sum ≤ hero gap.
 
 ## Install
 
@@ -121,6 +129,9 @@ JSON files per configured package per window, all under
 | `installer-poetry-30d-non-ci.json` | `poetry (30d)` | `poetry` only |
 | `installer-pdm-30d-non-ci.json` | `pdm (30d)` | `pdm` only |
 | `installer-pip-family-30d-non-ci.json` | `pip* (30d)` | `pip + pipenv + pipx` aggregate |
+| `os-linux-30d-non-ci.json` | `linux (30d)` | Per-OS, Linux |
+| `os-macos-30d-non-ci.json` | `macos (30d)` | Per-OS, macOS (Darwin) |
+| `os-windows-30d-non-ci.json` | `windows (30d)` | Per-OS, Windows |
 
 All files exclude CI traffic (BigQuery's `details.ci != True`). Each is a
 [shields.io endpoint badge](https://shields.io/badges/endpoint-badge) JSON.
