@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`uv.lock`** self-version entry synced from `0.2.0 → 0.3.0`. The v0.3.0 release commit ([`fdd4fc3`](https://github.com/cmeans/pypi-winnow-downloads/commit/fdd4fc3)) bumped `pyproject.toml` only; this brings `uv.lock`'s own `[[package]] name = "pypi-winnow-downloads"` block into agreement. Picked up by the weekly `uv-lock-refresh` cron on its first firing (2026-04-30). The cron's standard transitive-refresh framing did not apply to this run — entire diff is the self-version sync, no transitive pins changed. The underlying release-flow gap (`uv lock` should run as part of the release commit, as it did at v0.2.0) is tracked separately in [#60](https://github.com/cmeans/pypi-winnow-downloads/issues/60). No `pyproject.toml` range changes.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
