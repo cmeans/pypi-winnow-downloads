@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`.github/workflows/ci.yml`** lint job gains a `uv lock --locked` step that fails fast if `uv.lock` and `pyproject.toml` have drifted. Catches the v0.3.0-style regression where a release commit bumps `pyproject.toml` `version` without re-running `uv lock`, leaving the lockfile's self-version block on the previous release. Structural backstop: a release commit that forgets the lockfile bump now redlits its own PR before merge rather than landing and getting picked up days later by the weekly `uv-lock-refresh.yml` cron with mis-framed PR copy. Does not touch upstream-PyPI freshness — that remains the weekly cron's job, since `uv lock --locked` only checks `pyproject.toml`-vs-lockfile consistency, not lockfile-vs-PyPI freshness. Closes [#60](https://github.com/cmeans/pypi-winnow-downloads/issues/60).
+
 ### Changed
 
 - **`uv.lock`** self-version entry synced from `0.2.0 → 0.3.0`. The v0.3.0 release commit ([`fdd4fc3`](https://github.com/cmeans/pypi-winnow-downloads/commit/fdd4fc3)) bumped `pyproject.toml` only; this brings `uv.lock`'s own `[[package]] name = "pypi-winnow-downloads"` block into agreement. Picked up by the weekly `uv-lock-refresh` cron on its first firing (2026-04-30). The cron's standard transitive-refresh framing did not apply to this run — entire diff is the self-version sync, no transitive pins changed. The underlying release-flow gap (`uv lock` should run as part of the release commit, as it did at v0.2.0) is tracked separately in [#60](https://github.com/cmeans/pypi-winnow-downloads/issues/60). No `pyproject.toml` range changes.

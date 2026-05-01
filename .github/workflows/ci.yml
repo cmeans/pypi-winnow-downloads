@@ -18,6 +18,16 @@ jobs:
       - name: Set up Python
         run: uv python install 3.13
 
+      - name: Verify uv.lock is consistent with pyproject.toml
+        # Catches the v0.3.0-style regression where the release commit
+        # bumps `pyproject.toml` `version` but does not re-run `uv lock`,
+        # leaving `uv.lock`'s `[[package]] name = "pypi-winnow-downloads"`
+        # block on the previous version. `uv lock --locked` fails fast on
+        # that drift and on any other pyproject.toml-vs-lockfile mismatch.
+        # Does not touch upstream-PyPI freshness — that remains the weekly
+        # `uv-lock-refresh.yml` cron's job. See issue #60.
+        run: uv lock --locked
+
       - name: Install dependencies
         run: uv sync --extra dev
 
