@@ -166,12 +166,23 @@ def run_pypinfo(
     # short-circuits to a credential-setter path when --auth is present and
     # never runs the query. Use GOOGLE_APPLICATION_CREDENTIALS instead, which
     # pypinfo's core.py reads via os.environ.get on the no-flag path.
+    #
+    # `--limit 500` defends against pypinfo's CLI default of 10 (cli.py
+    # passes `limit or DEFAULT_LIMIT` to core.build_query, where falsy
+    # values including 0 fall back to 10 — there is no "no-limit" mode).
+    # The pivot is `ci x installer x system`: realistic max distinct
+    # combos for one package is ~3 x 8 x 4 = 96, so 500 leaves ~5x
+    # headroom for unexpected installer/system variants. SQL `LIMIT` is
+    # applied after aggregation, so a generous bound does not change
+    # `bytes_billed`. See docs/cost-model-and-pypinfo-gotchas.md.
     argv = [
         _resolve_pypinfo_path(),
         "--json",
         "--days",
         str(window_days),
         "--all",
+        "--limit",
+        "500",
         package,
         "ci",
         "installer",
