@@ -103,8 +103,8 @@ resulting file.
 
 BigQuery's free tier is 1 TiB of scan per month. At the per-package
 serial rate this collector uses (~4.6 GB scanned per package per
-30-day window query), a daily run on ~7 packages sits at the free-tier
-ceiling. The
+30-day window query), a daily run on ~7-8 packages sits at the
+free-tier ceiling. The
 [cost model and pypinfo gotchas](docs/cost-model-and-pypinfo-gotchas.md)
 doc has the full table, the levers for scaling beyond that, and why
 batching is *not* one of them.

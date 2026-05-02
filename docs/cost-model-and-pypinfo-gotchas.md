@@ -37,13 +37,13 @@ batching strategy.
 
 ### Cost envelope at the per-package serial rate (~4.6 GB/pkg/run)
 
-| Packages | Monthly bytes billed | Free tier (1 TB/mo) ceiling |
-|----------|----------------------|-----------------------------|
+| Packages | Monthly bytes billed | Free tier (1 TiB/mo) ceiling |
+|----------|----------------------|------------------------------|
 | 4        | 552 GB               | comfortably under            |
-| 7        | 966 GB               | at the ceiling               |
-| 10       | 1.38 TB              | ~$2/month over               |
-| 50       | 6.9 TB               | ~$30/month                   |
-| 100      | 13.8 TB              | ~$65/month                   |
+| 7        | 966 GB               | comfortably under (88%)      |
+| 10       | 1.38 TB              | ~$1.40/month over            |
+| 50       | 6.9 TB               | ~$29/month                   |
+| 100      | 13.8 TB              | ~$64/month                   |
 | 300      | 41 TB                | ~$200/month                  |
 
 After-free-tier rate: $5/TB.
@@ -148,8 +148,10 @@ recompute the combo ceiling and bump `--limit` accordingly.
 ## See also
 
 - `src/pypi_winnow_downloads/collector.py` — the live `run_pypinfo`
-  function with both gotchas commented at their respective line ranges
-  inside the function body.
+  function with the `--limit` gotcha commented inline. The `--where`
+  gotcha is not commented in the code because the collector ships
+  per-package serial and does not pass `--where`; it is preserved here
+  for anyone reviving the batched path or hacking on a fork.
 - `tests/test_collector.py::test_run_pypinfo_argv_passes_explicit_limit`
   — regression coverage that fails if `--limit` is dropped from argv.
 - [BigQuery pricing](https://cloud.google.com/bigquery/pricing#analysis_pricing)
