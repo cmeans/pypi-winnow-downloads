@@ -83,6 +83,41 @@ def test_run_pypinfo_argv_groups_by_ci_installer_system(tmp_path: Path) -> None:
     assert argv[-3:] == ["ci", "installer", "system"], argv
 
 
+def test_run_pypinfo_argv_passes_explicit_limit(tmp_path: Path) -> None:
+    """pypinfo's CLI defaults to `--limit 10` and treats falsy values
+    (including 0) as falling back to that default — `limit or DEFAULT_LIMIT`
+    in core.build_query. With a `ci x installer x system` pivot, realistic
+    distinct combos for a single package can run to several dozen rows; a
+    silent LIMIT-10 truncation would undercount the hero badge by dropping
+    the long tail of less-common installer/system pairs. The argv must
+    therefore carry an explicit `--limit` with a value comfortably above
+    the realistic ceiling. See docs/cost-model-and-pypinfo-gotchas.md.
+    """
+    captured: list[list[str]] = []
+
+    def fake_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        captured.append(list(argv))
+        return _ok_result(argv)
+
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    run_pypinfo("mypkg", 30, credential_file=creds, runner=fake_runner)
+
+    argv = captured[0]
+    assert "--limit" in argv, (
+        "argv must carry `--limit` to defeat pypinfo's default-10 truncation; "
+        "see docs/cost-model-and-pypinfo-gotchas.md gotcha 2."
+    )
+    limit_value = int(argv[argv.index("--limit") + 1])
+    # Realistic max combos for one package is ~3 x 8 x 4 = 96, so the bound
+    # must clear that with margin. 100 is the floor; the current value is
+    # 500 (~5x headroom).
+    assert limit_value >= 100, (
+        f"--limit must be >= 100 to clear the realistic ci-by-installer-by-system "
+        f"combo ceiling for one package; got {limit_value}."
+    )
+
+
 def _ok_rows(rows: list[dict]) -> str:
     """Helper: shape an `_ok_result` JSON payload from a list of pypinfo row dicts."""
     return json.dumps({"rows": rows})
